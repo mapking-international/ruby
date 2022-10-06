@@ -376,8 +376,8 @@ module Gem::Security
   # * The certificate contains a subject key identifier
 
   EXTENSIONS = {
-    "basicConstraints"     => "CA:FALSE",
-    "keyUsage"             =>
+    "basicConstraints" => "CA:FALSE",
+    "keyUsage" =>
       "keyEncipherment,dataEncipherment,digitalSignature",
     "subjectKeyIdentifier" => "hash",
   }.freeze
@@ -618,7 +618,7 @@ module Gem::Security
     path = File.expand_path path
 
     File.open path, "wb", permissions do |io|
-      if passphrase and cipher
+      if passphrase && cipher
         io.write pemmable.to_pem cipher, passphrase
       else
         io.write pemmable.to_pem

@@ -20,7 +20,7 @@ static inline VALUE vm_yield_with_cref(rb_execution_context_t *ec, int argc, con
 static inline VALUE vm_yield(rb_execution_context_t *ec, int argc, const VALUE *argv, int kw_splat);
 static inline VALUE vm_yield_with_block(rb_execution_context_t *ec, int argc, const VALUE *argv, VALUE block_handler, int kw_splat);
 static inline VALUE vm_yield_force_blockarg(rb_execution_context_t *ec, VALUE args);
-VALUE vm_exec(rb_execution_context_t *ec, bool mjit_enable_p);
+VALUE vm_exec(rb_execution_context_t *ec, bool jit_enable_p);
 static void vm_set_eval_stack(rb_execution_context_t * th, const rb_iseq_t *iseq, const rb_cref_t *cref, const struct rb_block *base_block);
 static int vm_collect_local_variables_in_heap(const VALUE *dfp, const struct local_var_list *vars);
 
@@ -408,7 +408,7 @@ cc_new(VALUE klass, ID mid, int argc, const rb_callable_method_entry_t *cme)
         }
 
         if (cc == NULL) {
-            const struct rb_callinfo *ci = vm_ci_new(mid, 0, argc, false); // TODO: proper ci
+            const struct rb_callinfo *ci = vm_ci_new(mid, 0, argc, NULL); // TODO: proper ci
             cc = vm_cc_new(klass, cme, vm_call_general);
             METHOD_ENTRY_CACHED_SET((struct rb_callable_method_entry_struct *)cme);
             vm_ccs_push(klass, ccs, ci, cc);
@@ -1672,6 +1672,8 @@ eval_make_iseq(VALUE src, VALUE fname, int line, const rb_binding_t *bind,
     rb_iseq_t *iseq = NULL;
     rb_ast_t *ast;
     int isolated_depth = 0;
+    int coverage_enabled = Qtrue;
+
     {
         int depth = 1;
         const VALUE *ep = vm_block_ep(base_block);
@@ -1703,14 +1705,20 @@ eval_make_iseq(VALUE src, VALUE fname, int line, const rb_binding_t *bind,
             rb_gc_register_mark_object(eval_default_path);
         }
         fname = eval_default_path;
+        coverage_enabled = Qfalse;
     }
 
     rb_parser_set_context(parser, parent, FALSE);
     ast = rb_parser_compile_string_path(parser, fname, src, line);
     if (ast->body.root) {
+        if (ast->body.compile_option == Qnil) {
+            ast->body.compile_option = rb_obj_hide(rb_ident_hash_new());
+        }
+        rb_hash_aset(ast->body.compile_option, rb_sym_intern_ascii_cstr("coverage_enabled"), coverage_enabled);
+
         iseq = rb_iseq_new_eval(&ast->body,
                                 ISEQ_BODY(parent)->location.label,
-                                fname, Qnil, INT2FIX(line),
+                                fname, Qnil, line,
                                 parent, isolated_depth);
     }
     rb_ast_dispose(ast);

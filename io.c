@@ -75,10 +75,6 @@
 #include <sys/fcntl.h>
 #endif
 
-#if !HAVE_OFF_T && !defined(off_t)
-# define off_t  long
-#endif
-
 #ifdef HAVE_SYS_TIME_H
 # include <sys/time.h>
 #endif
@@ -147,10 +143,6 @@
 
 #ifndef O_ACCMODE
 #define O_ACCMODE (O_RDONLY | O_WRONLY | O_RDWR)
-#endif
-
-#if SIZEOF_OFF_T > SIZEOF_LONG && !defined(HAVE_LONG_LONG)
-# error off_t is bigger than long, but you have no long long...
 #endif
 
 #ifndef PIPE_BUF
@@ -620,7 +612,7 @@ raise_on_write(rb_io_t *fptr, int e, VALUE errinfo)
 static void
 io_unread(rb_io_t *fptr)
 {
-    off_t r, pos;
+    rb_off_t r, pos;
     ssize_t read_size;
     long i;
     long newlines = 0;
@@ -859,7 +851,7 @@ rb_io_s_try_convert(VALUE dummy, VALUE io)
 static void
 io_unread(rb_io_t *fptr)
 {
-    off_t r;
+    rb_off_t r;
     rb_io_check_closed(fptr);
     if (fptr->rbuf.len == 0 || fptr->mode & FMODE_DUPLEX)
         return;
@@ -2065,7 +2057,8 @@ io_writev(int argc, const VALUE *argv, VALUE io)
  *    write(*objects) -> integer
  *
  *  Writes each of the given +objects+ to +self+,
- *  which must be opened for writing (see IO@Modes);
+ *  which must be opened for writing
+ *  (see {Access Modes}[rdoc-ref:File@Access+Modes]);
  *  returns the total number bytes written;
  *  each of +objects+ that is not a string is converted via method +to_s+:
  *
@@ -2124,7 +2117,7 @@ rb_io_writev(VALUE io, int argc, const VALUE *argv)
  *    self << object -> self
  *
  *  Writes the given +object+ to +self+,
- *  which must be opened for writing (see IO@Modes);
+ *  which must be opened for writing (see {Access Modes}[rdoc-ref:File@Access+Modes]);
  *  returns +self+;
  *  if +object+ is not a string, it is converted via method +to_s+:
  *
@@ -2206,7 +2199,7 @@ rb_io_flush(VALUE io)
  *    tell -> integer
  *
  *  Returns the current position (in bytes) in +self+
- *  (see {Position}[rdoc-ref:IO@Position]):
+ *  (see {Position}[rdoc-ref:io_streams.rdoc@Position]):
  *
  *    f = File.open('t.txt')
  *    f.tell # => 0
@@ -2224,7 +2217,7 @@ static VALUE
 rb_io_tell(VALUE io)
 {
     rb_io_t *fptr;
-    off_t pos;
+    rb_off_t pos;
 
     GetOpenFile(io, fptr);
     pos = io_tell(fptr);
@@ -2237,7 +2230,7 @@ static VALUE
 rb_io_seek(VALUE io, VALUE offset, int whence)
 {
     rb_io_t *fptr;
-    off_t pos;
+    rb_off_t pos;
 
     pos = NUM2OFFT(offset);
     GetOpenFile(io, fptr);
@@ -2272,7 +2265,7 @@ interpret_seek_whence(VALUE vwhence)
  *    seek(offset, whence = IO::SEEK_SET) -> 0
  *
  *  Seeks to the position given by integer +offset+
- *  (see {Position}[rdoc-ref:IO@Position])
+ *  (see {Position}[rdoc-ref:io_streams.rdoc@Position])
  *  and constant +whence+, which is one of:
  *
  *  - +:CUR+ or <tt>IO::SEEK_CUR</tt>:
@@ -2332,7 +2325,7 @@ rb_io_seek_m(int argc, VALUE *argv, VALUE io)
  *    pos = new_position -> new_position
  *
  *  Seeks to the given +new_position+ (in bytes);
- *  see {Position}[rdoc-ref:IO@Position]:
+ *  see {Position}[rdoc-ref:io_streams.rdoc@Position]:
  *
  *    f = File.open('t.txt')
  *    f.tell     # => 0
@@ -2348,7 +2341,7 @@ static VALUE
 rb_io_set_pos(VALUE io, VALUE offset)
 {
     rb_io_t *fptr;
-    off_t pos;
+    rb_off_t pos;
 
     pos = NUM2OFFT(offset);
     GetOpenFile(io, fptr);
@@ -2366,8 +2359,8 @@ static void clear_readconv(rb_io_t *fptr);
  *
  *  Repositions the stream to its beginning,
  *  setting both the position and the line number to zero;
- *  see {Position}[rdoc-ref:IO@Position]
- *  and {Line Number}[rdoc-ref:IO@Line+Number]:
+ *  see {Position}[rdoc-ref:io_streams.rdoc@Position]
+ *  and {Line Number}[rdoc-ref:io_streams.rdoc@Line+Number]:
  *
  *    f = File.open('t.txt')
  *    f.tell     # => 0
@@ -2457,7 +2450,7 @@ io_fillbuf(rb_io_t *fptr)
  *    eof -> true or false
  *
  *  Returns +true+ if the stream is positioned at its end, +false+ otherwise;
- *  see {Position}[rdoc-ref:IO@Position]:
+ *  see {Position}[rdoc-ref:io_streams.rdoc@Position]:
  *
  *    f = File.open('t.txt')
  *    f.eof           # => false
@@ -2466,7 +2459,7 @@ io_fillbuf(rb_io_t *fptr)
  *    f.close
  *
  *  Raises an exception unless the stream is opened for reading;
- *  see {Mode}[rdoc-ref:IO@Mode].
+ *  see {Mode}[rdoc-ref:File@Access+Modes].
  *
  *  If +self+ is a stream such as pipe or socket, this method
  *  blocks until the other end sends some data or closes it:
@@ -2884,8 +2877,8 @@ static long
 remain_size(rb_io_t *fptr)
 {
     struct stat st;
-    off_t siz = READ_DATA_PENDING_COUNT(fptr);
-    off_t pos;
+    rb_off_t siz = READ_DATA_PENDING_COUNT(fptr);
+    rb_off_t pos;
 
     if (fstat(fptr->fd, &st) == 0  && S_ISREG(st.st_mode)
 #if defined(__HAIKU__)
@@ -3061,7 +3054,8 @@ static int
 io_setstrbuf(VALUE *str, long len)
 {
 #ifdef _WIN32
-    len = (len + 1) & ~1L;	/* round up for wide char */
+    if (len > 0)
+        len = (len + 1) & ~1L;	/* round up for wide char */
 #endif
     if (NIL_P(*str)) {
         *str = rb_str_new(0, len);
@@ -4024,7 +4018,7 @@ rb_io_gets_internal(VALUE io)
  *    gets(sep, limit, **line_opts) -> string or nil
  *
  *  Reads and returns a line from the stream
- *  (see {Lines}[rdoc-ref:IO@Lines]);
+ *  (see {Line IO}[rdoc-ref:io_streams.rdoc@Line+IO]);
  *  assigns the return value to <tt>$_</tt>.
  *
  *  With no arguments given, returns the next line
@@ -4042,7 +4036,7 @@ rb_io_gets_internal(VALUE io)
  *  With only string argument +sep+ given,
  *  returns the next line as determined by line separator +sep+,
  *  or +nil+ if none;
- *  see {Line Separator}[rdoc-ref:IO@Line+Separator]:
+ *  see {Line Separator}[rdoc-ref:io_streams.rdoc@Line+Separator]:
  *
  *    f = File.new('t.txt')
  *    f.gets('l')   # => "First l"
@@ -4063,7 +4057,7 @@ rb_io_gets_internal(VALUE io)
  *
  *  With only integer argument +limit+ given,
  *  limits the number of bytes in the line;
- *  see {Line Limit}}[rdoc-ref:IO@Line+Limit]:
+ *  see {Line Limit}[rdoc-ref:io_streams.rdoc@Line+Limit]:
  *
  *    # No more than one line.
  *    File.open('t.txt') {|f| f.gets(10) } # => "First line"
@@ -4078,7 +4072,7 @@ rb_io_gets_internal(VALUE io)
  *  - But returns no more bytes than are allowed by the limit.
  *
  *  For all forms above, optional keyword arguments +line_opts+ specify
- *  {Line Options}[rdoc-ref:IO@Line+Options]:
+ *  {Line Options}[rdoc-ref:io_streams.rdoc@Line+Options]:
  *
  *    f = File.open('t.txt')
  *    # Chomp the lines.
@@ -4108,7 +4102,7 @@ rb_io_gets_m(int argc, VALUE *argv, VALUE io)
  *    lineno -> integer
  *
  *  Returns the current line number for the stream.
- *  See {Line Number}[rdoc-ref:IO@Line+Number].
+ *  See {Line Number}[rdoc-ref:io_streams.rdoc@Line+Number].
  *
  */
 
@@ -4127,7 +4121,7 @@ rb_io_lineno(VALUE io)
  *    lineno = integer -> integer
  *
  *  Sets and returns the line number for the stream.
- *  See {Line Number}[rdoc-ref:IO@Line+Number].
+ *  See {Line Number}[rdoc-ref:io_streams.rdoc@Line+Number].
  *
  */
 
@@ -4172,7 +4166,7 @@ static VALUE io_readlines(const struct getline_arg *arg, VALUE io);
  *    readlines(sep, limit, **line_opts) -> array
  *
  *  Reads and returns all remaining line from the stream
- *  (see {Lines}[rdoc-ref:IO@Lines]);
+ *  (see {Line IO}[rdoc-ref:io_streams.rdoc@Line+IO]);
  *  does not modify <tt>$_</tt>.
  *
  *  With no arguments given, returns lines
@@ -4187,7 +4181,7 @@ static VALUE io_readlines(const struct getline_arg *arg, VALUE io);
  *  With only string argument +sep+ given,
  *  returns lines as determined by line separator +sep+,
  *  or +nil+ if none;
- *  see {Line Separator}[rdoc-ref:IO@Line+Separator]:
+ *  see {Line Separator}[rdoc-ref:io_streams.rdoc@Line+Separator]:
  *
  *    f = File.new('t.txt')
  *    f.readlines('li')
@@ -4208,7 +4202,7 @@ static VALUE io_readlines(const struct getline_arg *arg, VALUE io);
  *
  *  With only integer argument +limit+ given,
  *  limits the number of bytes in each line;
- *  see {Line Limit}[rdoc-ref:IO@Line+Limit]:
+ *  see {Line Limit}[rdoc-ref:io_streams.rdoc@Line+Limit]:
  *
  *    f = File.new('t.txt')
  *    f.readlines(8)
@@ -4222,7 +4216,7 @@ static VALUE io_readlines(const struct getline_arg *arg, VALUE io);
  *  - But returns no more bytes in a line than are allowed by the limit.
  *
  *  For all forms above, optional keyword arguments +line_opts+ specify
- *  {Line Options}[rdoc-ref:IO@Line+Options]:
+ *  {Line Options}[rdoc-ref:io_streams.rdoc@Line+Options]:
  *
  *    f = File.new('t.txt')
  *    f.readlines(chomp: true)
@@ -4262,7 +4256,7 @@ io_readlines(const struct getline_arg *arg, VALUE io)
  *    each_line                                   -> enumerator
  *
  *  Calls the block with each remaining line read from the stream
- *  (see {Lines}[rdoc-ref:IO@Lines]);
+ *  (see {Line IO}[rdoc-ref:io_streams.rdoc@Line+IO]);
  *  does nothing if already at end-of-file;
  *  returns +self+.
  *
@@ -4284,7 +4278,7 @@ io_readlines(const struct getline_arg *arg, VALUE io)
  *
  *  With only string argument +sep+ given,
  *  reads lines as determined by line separator +sep+;
- *  see {Line Separator}[rdoc-ref:IO@Line+Separator]:
+ *  see {Line Separator}[rdoc-ref:io_streams.rdoc@Line+Separator]:
  *
  *    f = File.new('t.txt')
  *    f.each_line('li') {|line| p line }
@@ -4320,7 +4314,7 @@ io_readlines(const struct getline_arg *arg, VALUE io)
  *
  *  With only integer argument +limit+ given,
  *  limits the number of bytes in each line;
- *  see {Line Limit}}[rdoc-ref:IO@Line+Limit]:
+ *  see {Line Limit}[rdoc-ref:io_streams.rdoc@Line+Limit]:
  *
  *    f = File.new('t.txt')
  *    f.each_line(8) {|line| p line }
@@ -4345,7 +4339,7 @@ io_readlines(const struct getline_arg *arg, VALUE io)
  *  - But returns no more bytes than are allowed by the limit.
  *
  *  For all forms above, optional keyword arguments +line_opts+ specify
- *  {Line Options}[rdoc-ref:IO@Line+Options]:
+ *  {Line Options}[rdoc-ref:io_streams.rdoc@Line+Options]:
  *
  *    f = File.new('t.txt')
  *    f.each_line(chomp: true) {|line| p line }
@@ -5662,7 +5656,7 @@ rb_io_sysseek(int argc, VALUE *argv, VALUE io)
     VALUE offset, ptrname;
     int whence = SEEK_SET;
     rb_io_t *fptr;
-    off_t pos;
+    rb_off_t pos;
 
     if (rb_scan_args(argc, argv, "11", &offset, &ptrname) == 2) {
         whence = interpret_seek_whence(ptrname);
@@ -5790,7 +5784,7 @@ struct prdwr_internal_arg {
     int fd;
     void *buf;
     size_t count;
-    off_t offset;
+    rb_off_t offset;
 };
 #endif /* HAVE_PREAD || HAVE_PWRITE */
 
@@ -5818,7 +5812,7 @@ pread_internal_call(VALUE arg)
  *
  *  - Reads at the given +offset+ (in bytes).
  *  - Disregards, and does not modify, the stream's position
- *    (see {Position}[rdoc-ref:IO@Position]).
+ *    (see {Position}[rdoc-ref:io_streams.rdoc@Position]).
  *  - Bypasses any user space buffering in the stream.
  *
  *  Because this method does not disturb the stream's state
@@ -5894,7 +5888,7 @@ internal_pwrite_func(void *ptr)
  *
  *  - Writes at the given +offset+ (in bytes).
  *  - Disregards, and does not modify, the stream's position
- *    (see {Position}[rdoc-ref:IO@Position]).
+ *    (see {Position}[rdoc-ref:io_streams.rdoc@Position]).
  *  - Bypasses any user space buffering in the stream.
  *
  *  Because this method does not disturb the stream's state
@@ -6005,7 +5999,7 @@ rb_io_ascii8bit_binmode(VALUE io)
  *    binmode -> self
  *
  *  Sets the stream's data mode as binary
- *  (see {Data Mode}[rdoc-ref:IO@Data+Mode]).
+ *  (see {Data Mode}[rdoc-ref:File@Data+Mode]).
  *
  *  A stream's data mode may not be changed from binary to text.
  *
@@ -6029,7 +6023,7 @@ rb_io_binmode_m(VALUE io)
  *    binmode? -> true or false
  *
  *  Returns +true+ if the stream is on binary mode, +false+ otherwise.
- *  See {Data Mode}[rdoc-ref:IO@Data+Mode].
+ *  See {Data Mode}[rdoc-ref:File@Data+Mode].
  *
  */
 static VALUE
@@ -7460,7 +7454,7 @@ static VALUE popen_finish(VALUE port, VALUE klass);
  *  and the block's value is assigned to global variable <tt>$?</tt> and returned.
  *
  *  Optional argument +mode+ may be any valid \IO mode.
- *  See IO@Modes.
+ *  See {Access Modes}[rdoc-ref:File@Access+Modes].
  *
  *  Required argument +cmd+ determines which of the following occurs:
  *
@@ -7984,7 +7978,7 @@ io_reopen(VALUE io, VALUE nfile)
 {
     rb_io_t *fptr, *orig;
     int fd, fd2;
-    off_t pos = 0;
+    rb_off_t pos = 0;
 
     nfile = rb_io_get_io(nfile);
     GetOpenFile(io, fptr);
@@ -8204,7 +8198,7 @@ rb_io_init_copy(VALUE dest, VALUE io)
     rb_io_t *fptr, *orig;
     int fd;
     VALUE write_io;
-    off_t pos;
+    rb_off_t pos;
 
     io = rb_io_get_io(io);
     if (!OBJ_INIT_COPY(dest, io)) return dest;
@@ -9034,8 +9028,8 @@ rb_io_make_open_file(VALUE obj)
  *    io = IO.new(fd)
  *    io.external_encoding # => #<Encoding:UTF-8> # Not ASCII-8BIT.
  *
- *  Optional argument +mode+ (defaults to 'r') must specify a valid mode
- *  see IO@Modes:
+ *  Optional argument +mode+ (defaults to 'r') must specify a valid mode;
+ *  see {Access Modes}[rdoc-ref:File@Access+Modes]:
  *
  *    IO.new(fd, 'w')         # => #<IO:fd 3>
  *    IO.new(fd, File::WRONLY) # => #<IO:fd 3>
@@ -9172,14 +9166,14 @@ rb_io_set_encoding_by_bom(VALUE io)
  *    File.new('/etc/fstab')
  *    File.new('t.txt')
  *
- *  Optional argument +mode+ (defaults to 'r') must specify a valid mode
- *  see IO@Modes:
+ *  Optional argument +mode+ (defaults to 'r') must specify a valid mode;
+ *  see {Access Modes}[rdoc-ref:File@Access+Modes]:
  *
  *    File.new('t.tmp', 'w')
  *    File.new('t.tmp', File::RDONLY)
  *
  *  Optional argument +perm+ (defaults to 0666) must specify valid permissions
- *  see {File Permissions}[rdoc-ref:IO@File+Permissions]:
+ *  see {File Permissions}[rdoc-ref:File@File+Permissions]:
  *
  *    File.new('t.tmp', File::CREAT, 0644)
  *    File.new('t.tmp', File::CREAT, 0444)
@@ -10041,12 +10035,12 @@ static VALUE argf_readlines(int, VALUE *, VALUE);
  *
  *  Returns an array containing the lines returned by calling
  *  Kernel#gets until the end-of-file is reached;
- *  (see {Lines}[rdoc-ref:IO@Lines]).
+ *  (see {Line IO}[rdoc-ref:io_streams.rdoc@Line+IO]).
  *
  *  With only string argument +sep+ given,
  *  returns the remaining lines as determined by line separator +sep+,
  *  or +nil+ if none;
- *  see {Line Separator}[rdoc-ref:IO@Line+Separator]:
+ *  see {Line Separator}[rdoc-ref:io_streams.rdoc@Line+Separator]:
  *
  *    # Default separator.
  *    $ cat t.txt | ruby -e "p readlines"
@@ -10066,7 +10060,7 @@ static VALUE argf_readlines(int, VALUE *, VALUE);
  *
  *  With only integer argument +limit+ given,
  *  limits the number of bytes in the line;
- *  see {Line Limit}[rdoc-ref:IO@Line+Limit]:
+ *  see {Line Limit}[rdoc-ref:io_streams.rdoc@Line+Limit]:
  *
  *    $cat t.txt | ruby -e "p readlines 10"
  *    ["First line", "\n", "Second lin", "e\n", "\n", "Fourth lin", "e\n", "Fifth line", "\n"]
@@ -10078,11 +10072,11 @@ static VALUE argf_readlines(int, VALUE *, VALUE);
  *    ["First line\n", "Second line\n", "\n", "Fourth line\n", "Fifth line\n"]
  *
  *  With arguments +sep+ and +limit+ given, combines the two behaviors;
- *  see {Line Separator and Line Limit}[rdoc-ref:IO@Line+Separator+and+Line+Limit].
+ *  see {Line Separator and Line Limit}[rdoc-ref:io_streams.rdoc@Line+Separator+and+Line+Limit].
  *
  *  For all forms above, optional keyword arguments specify:
  *
- *  - {Line Options}[rdoc-ref:IO@Line+Options].
+ *  - {Line Options}[rdoc-ref:io_streams.rdoc@Line+Options].
  *  - {Encoding options}[rdoc-ref:encodings.rdoc@Encoding+Options].
  *
  *  Examples:
@@ -10345,8 +10339,8 @@ static VALUE sym_normal,   sym_sequential, sym_random,
 struct io_advise_struct {
     int fd;
     int advice;
-    off_t offset;
-    off_t len;
+    rb_off_t offset;
+    rb_off_t len;
 };
 
 static VALUE
@@ -10393,7 +10387,7 @@ io_advise_sym_to_const(VALUE sym)
 }
 
 static VALUE
-do_io_advise(rb_io_t *fptr, VALUE advice, off_t offset, off_t len)
+do_io_advise(rb_io_t *fptr, VALUE advice, rb_off_t offset, rb_off_t len)
 {
     int rv;
     struct io_advise_struct ias;
@@ -10483,7 +10477,7 @@ static VALUE
 rb_io_advise(int argc, VALUE *argv, VALUE io)
 {
     VALUE advice, offset, len;
-    off_t off, l;
+    rb_off_t off, l;
     rb_io_t *fptr;
 
     rb_scan_args(argc, argv, "12", &advice, &offset, &len);
@@ -11518,6 +11512,8 @@ io_s_foreach(VALUE v)
     struct getline_arg *arg = (void *)v;
     VALUE str;
 
+    if (arg->limit == 0)
+        rb_raise(rb_eArgError, "invalid limit: 0 for foreach");
     while (!NIL_P(str = rb_io_getline_1(arg->rs, arg->limit, arg->chomp, arg->io))) {
         rb_lastline_set(str);
         rb_yield(str);
@@ -11564,7 +11560,7 @@ io_s_foreach(VALUE v)
  *  For both forms, command and path, the remaining arguments are the same.
  *
  *  With argument +sep+ given, parses lines as determined by that line separator
- *  (see {Line Separator}[rdoc-ref:IO@Line+Separator]):
+ *  (see {Line Separator}[rdoc-ref:io_streams.rdoc@Line+Separator]):
  *
  *    File.foreach('t.txt', 'li') {|line| p line }
  *
@@ -11587,7 +11583,7 @@ io_s_foreach(VALUE v)
  *
  *  With argument +limit+ given, parses lines as determined by the default
  *  line separator and the given line-length limit
- *  (see {Line Limit}[rdoc-ref:IO@Line+Limit]):
+ *  (see {Line Limit}[rdoc-ref:io_streams.rdoc@Line+Limit]):
  *
  *    File.foreach('t.txt', 7) {|line| p line }
  *
@@ -11606,13 +11602,13 @@ io_s_foreach(VALUE v)
  *  With arguments +sep+ and  +limit+ given,
  *  parses lines as determined by the given
  *  line separator and the given line-length limit
- *  (see {Line Separator and Line Limit}[rdoc-ref:IO@Line+Separator+and+Line+Limit]):
+ *  (see {Line Separator and Line Limit}[rdoc-ref:io_streams.rdoc@Line+Separator+and+Line+Limit]):
  *
  *  Optional keyword arguments +opts+ specify:
  *
  *  - {Open Options}[rdoc-ref:IO@Open+Options].
  *  - {Encoding options}[rdoc-ref:encodings.rdoc@Encoding+Options].
- *  - {Line Options}[rdoc-ref:IO@Line+Options].
+ *  - {Line Options}[rdoc-ref:io_streams.rdoc@Line+Options].
  *
  *  Returns an Enumerator if no block is given.
  *
@@ -11682,7 +11678,7 @@ io_s_readlines(VALUE v)
  *  For both forms, command and path, the remaining arguments are the same.
  *
  *  With argument +sep+ given, parses lines as determined by that line separator
- *  (see {Line Separator}[rdoc-ref:IO@Line+Separator]):
+ *  (see {Line Separator}[rdoc-ref:io_streams.rdoc@Line+Separator]):
  *
  *    # Ordinary separator.
  *    IO.readlines('t.txt', 'li')
@@ -11696,7 +11692,7 @@ io_s_readlines(VALUE v)
  *
  *  With argument +limit+ given, parses lines as determined by the default
  *  line separator and the given line-length limit
- *  (see {Line Limit}[rdoc-ref:IO@Line+Limit]):
+ *  (see {Line Limit}[rdoc-ref:io_streams.rdoc@Line+Limit]):
  *
  *    IO.readlines('t.txt', 7)
  *    # => ["First l", "ine\n", "Second ", "line\n", "\n", "Third l", "ine\n", "Fourth ", "line\n"]
@@ -11704,13 +11700,13 @@ io_s_readlines(VALUE v)
  *  With arguments +sep+ and  +limit+ given,
  *  parses lines as determined by the given
  *  line separator and the given line-length limit
- *  (see {Line Separator and Line Limit}[rdoc-ref:IO@Line+Separator+and+Line+Limit]):
+ *  (see {Line Separator and Line Limit}[rdoc-ref:io_streams.rdoc@Line+Separator+and+Line+Limit]):
  *
  *  Optional keyword arguments +opts+ specify:
  *
  *  - {Open Options}[rdoc-ref:IO@Open+Options].
  *  - {Encoding options}[rdoc-ref:encodings.rdoc@Encoding+Options].
- *  - {Line Options}[rdoc-ref:IO@Line+Options].
+ *  - {Line Options}[rdoc-ref:io_streams.rdoc@Line+Options].
  *
  */
 
@@ -11776,11 +11772,15 @@ seek_before_access(VALUE argp)
  *    IO.read('| cat t.txt')
  *    # => "First line\nSecond line\n\nThird line\nFourth line\n"
  *
- *  With only argument +path+ given, reads and returns the entire content
+ *  With only argument +path+ given, reads in text mode and returns the entire content
  *  of the file at the given path:
  *
  *    IO.read('t.txt')
  *    # => "First line\nSecond line\n\nThird line\nFourth line\n"
+ *
+ *  On Windows, text mode can terminate reading and leave bytes in the file
+ *  unread when encountering certain special bytes. Consider using
+ *  IO.binread if all bytes in the file should be read.
  *
  *  For both forms, command and path, the remaining arguments are the same.
  *
@@ -12023,15 +12023,15 @@ rb_io_s_binwrite(int argc, VALUE *argv, VALUE io)
 struct copy_stream_struct {
     VALUE src;
     VALUE dst;
-    off_t copy_length; /* (off_t)-1 if not specified */
-    off_t src_offset; /* (off_t)-1 if not specified */
+    rb_off_t copy_length; /* (rb_off_t)-1 if not specified */
+    rb_off_t src_offset; /* (rb_off_t)-1 if not specified */
 
     rb_io_t *src_fptr;
     rb_io_t *dst_fptr;
     unsigned close_src : 1;
     unsigned close_dst : 1;
     int error_no;
-    off_t total;
+    rb_off_t total;
     const char *syserr;
     const char *notimp;
     VALUE th;
@@ -12196,7 +12196,7 @@ nogvl_copy_stream_wait_write(struct copy_stream_struct *stp)
 #ifdef USE_COPY_FILE_RANGE
 
 static ssize_t
-simple_copy_file_range(int in_fd, off_t *in_offset, int out_fd, off_t *out_offset, size_t count, unsigned int flags)
+simple_copy_file_range(int in_fd, rb_off_t *in_offset, int out_fd, rb_off_t *out_offset, size_t count, unsigned int flags)
 {
 #ifdef HAVE_COPY_FILE_RANGE
     return copy_file_range(in_fd, in_offset, out_fd, out_offset, count, flags);
@@ -12209,15 +12209,15 @@ static int
 nogvl_copy_file_range(struct copy_stream_struct *stp)
 {
     ssize_t ss;
-    off_t src_size;
-    off_t copy_length, src_offset, *src_offset_ptr;
+    rb_off_t src_size;
+    rb_off_t copy_length, src_offset, *src_offset_ptr;
 
     if (!S_ISREG(stp->src_stat.st_mode))
         return 0;
 
     src_size = stp->src_stat.st_size;
     src_offset = stp->src_offset;
-    if (src_offset >= (off_t)0) {
+    if (src_offset >= (rb_off_t)0) {
         src_offset_ptr = &src_offset;
     }
     else {
@@ -12225,12 +12225,12 @@ nogvl_copy_file_range(struct copy_stream_struct *stp)
     }
 
     copy_length = stp->copy_length;
-    if (copy_length < (off_t)0) {
-        if (src_offset < (off_t)0) {
-            off_t current_offset;
+    if (copy_length < (rb_off_t)0) {
+        if (src_offset < (rb_off_t)0) {
+            rb_off_t current_offset;
             errno = 0;
             current_offset = lseek(stp->src_fptr->fd, 0, SEEK_CUR);
-            if (current_offset < (off_t)0 && errno) {
+            if (current_offset < (rb_off_t)0 && errno) {
                 stp->syserr = "lseek";
                 stp->error_no = errno;
                 return (int)current_offset;
@@ -12245,7 +12245,7 @@ nogvl_copy_file_range(struct copy_stream_struct *stp)
   retry_copy_file_range:
 # if SIZEOF_OFF_T > SIZEOF_SIZE_T
     /* we are limited by the 32-bit ssize_t return value on 32-bit */
-    ss = (copy_length > (off_t)SSIZE_MAX) ? SSIZE_MAX : (ssize_t)copy_length;
+    ss = (copy_length > (rb_off_t)SSIZE_MAX) ? SSIZE_MAX : (ssize_t)copy_length;
 # else
     ss = (ssize_t)copy_length;
 # endif
@@ -12304,11 +12304,11 @@ nogvl_copy_file_range(struct copy_stream_struct *stp)
 static int
 nogvl_fcopyfile(struct copy_stream_struct *stp)
 {
-    off_t cur, ss = 0;
-    const off_t src_offset = stp->src_offset;
+    rb_off_t cur, ss = 0;
+    const rb_off_t src_offset = stp->src_offset;
     int ret;
 
-    if (stp->copy_length >= (off_t)0) {
+    if (stp->copy_length >= (rb_off_t)0) {
         /* copy_length can't be specified in fcopyfile(3) */
         return 0;
     }
@@ -12318,30 +12318,30 @@ nogvl_fcopyfile(struct copy_stream_struct *stp)
 
     if (!S_ISREG(stp->dst_stat.st_mode))
         return 0;
-    if (lseek(stp->dst_fptr->fd, 0, SEEK_CUR) > (off_t)0) /* if dst IO was already written */
+    if (lseek(stp->dst_fptr->fd, 0, SEEK_CUR) > (rb_off_t)0) /* if dst IO was already written */
         return 0;
     if (fcntl(stp->dst_fptr->fd, F_GETFL) & O_APPEND) {
         /* fcopyfile(3) appends src IO to dst IO and then truncates
          * dst IO to src IO's original size. */
-        off_t end = lseek(stp->dst_fptr->fd, 0, SEEK_END);
+        rb_off_t end = lseek(stp->dst_fptr->fd, 0, SEEK_END);
         lseek(stp->dst_fptr->fd, 0, SEEK_SET);
-        if (end > (off_t)0) return 0;
+        if (end > (rb_off_t)0) return 0;
     }
 
-    if (src_offset > (off_t)0) {
-        off_t r;
+    if (src_offset > (rb_off_t)0) {
+        rb_off_t r;
 
         /* get current offset */
         errno = 0;
         cur = lseek(stp->src_fptr->fd, 0, SEEK_CUR);
-        if (cur < (off_t)0 && errno) {
+        if (cur < (rb_off_t)0 && errno) {
             stp->error_no = errno;
             return 1;
         }
 
         errno = 0;
         r = lseek(stp->src_fptr->fd, src_offset, SEEK_SET);
-        if (r < (off_t)0 && errno) {
+        if (r < (rb_off_t)0 && errno) {
             stp->error_no = errno;
             return 1;
         }
@@ -12353,12 +12353,12 @@ nogvl_fcopyfile(struct copy_stream_struct *stp)
 
     if (ret == 0) { /* success */
         stp->total = ss;
-        if (src_offset > (off_t)0) {
-            off_t r;
+        if (src_offset > (rb_off_t)0) {
+            rb_off_t r;
             errno = 0;
             /* reset offset */
             r = lseek(stp->src_fptr->fd, cur, SEEK_SET);
-            if (r < (off_t)0 && errno) {
+            if (r < (rb_off_t)0 && errno) {
                 stp->error_no = errno;
                 return 1;
             }
@@ -12389,7 +12389,7 @@ nogvl_fcopyfile(struct copy_stream_struct *stp)
 #  endif
 
 static ssize_t
-simple_sendfile(int out_fd, int in_fd, off_t *offset, off_t count)
+simple_sendfile(int out_fd, int in_fd, rb_off_t *offset, rb_off_t count)
 {
     return sendfile(out_fd, in_fd, offset, (size_t)count);
 }
@@ -12401,11 +12401,11 @@ simple_sendfile(int out_fd, int in_fd, off_t *offset, off_t count)
 #  define USE_SENDFILE
 
 static ssize_t
-simple_sendfile(int out_fd, int in_fd, off_t *offset, off_t count)
+simple_sendfile(int out_fd, int in_fd, rb_off_t *offset, rb_off_t count)
 {
     int r;
-    off_t pos = offset ? *offset : lseek(in_fd, 0, SEEK_CUR);
-    off_t sbytes;
+    rb_off_t pos = offset ? *offset : lseek(in_fd, 0, SEEK_CUR);
+    rb_off_t sbytes;
 #  ifdef __APPLE__
     r = sendfile(in_fd, out_fd, pos, &count, NULL, 0);
     sbytes = count;
@@ -12431,9 +12431,9 @@ static int
 nogvl_copy_stream_sendfile(struct copy_stream_struct *stp)
 {
     ssize_t ss;
-    off_t src_size;
-    off_t copy_length;
-    off_t src_offset;
+    rb_off_t src_size;
+    rb_off_t copy_length;
+    rb_off_t src_offset;
     int use_pread;
 
     if (!S_ISREG(stp->src_stat.st_mode))
@@ -12446,17 +12446,17 @@ nogvl_copy_stream_sendfile(struct copy_stream_struct *stp)
 #endif
 
     src_offset = stp->src_offset;
-    use_pread = src_offset >= (off_t)0;
+    use_pread = src_offset >= (rb_off_t)0;
 
     copy_length = stp->copy_length;
-    if (copy_length < (off_t)0) {
+    if (copy_length < (rb_off_t)0) {
         if (use_pread)
             copy_length = src_size - src_offset;
         else {
-            off_t cur;
+            rb_off_t cur;
             errno = 0;
             cur = lseek(stp->src_fptr->fd, 0, SEEK_CUR);
-            if (cur < (off_t)0 && errno) {
+            if (cur < (rb_off_t)0 && errno) {
                 stp->syserr = "lseek";
                 stp->error_no = errno;
                 return (int)cur;
@@ -12468,7 +12468,7 @@ nogvl_copy_stream_sendfile(struct copy_stream_struct *stp)
   retry_sendfile:
 # if SIZEOF_OFF_T > SIZEOF_SIZE_T
     /* we are limited by the 32-bit ssize_t return value on 32-bit */
-    ss = (copy_length > (off_t)SSIZE_MAX) ? SSIZE_MAX : (ssize_t)copy_length;
+    ss = (copy_length > (rb_off_t)SSIZE_MAX) ? SSIZE_MAX : (ssize_t)copy_length;
 # else
     ss = (ssize_t)copy_length;
 # endif
@@ -12539,11 +12539,11 @@ maygvl_read(int has_gvl, rb_io_t *fptr, void *buf, size_t count)
 }
 
 static ssize_t
-maygvl_copy_stream_read(int has_gvl, struct copy_stream_struct *stp, char *buf, size_t len, off_t offset)
+maygvl_copy_stream_read(int has_gvl, struct copy_stream_struct *stp, char *buf, size_t len, rb_off_t offset)
 {
     ssize_t ss;
   retry_read:
-    if (offset < (off_t)0) {
+    if (offset < (rb_off_t)0) {
         ss = maygvl_read(has_gvl, stp->src_fptr, buf, len);
     }
     else {
@@ -12576,7 +12576,7 @@ maygvl_copy_stream_read(int has_gvl, struct copy_stream_struct *stp, char *buf, 
             return ss;
 #endif
         }
-        stp->syserr = offset < (off_t)0 ?  "read" : "pread";
+        stp->syserr = offset < (rb_off_t)0 ?  "read" : "pread";
         stp->error_no = errno;
     }
     return ss;
@@ -12615,31 +12615,31 @@ nogvl_copy_stream_read_write(struct copy_stream_struct *stp)
     size_t len;
     ssize_t ss;
     int ret;
-    off_t copy_length;
+    rb_off_t copy_length;
+    rb_off_t src_offset;
     int use_eof;
-    off_t src_offset;
     int use_pread;
 
     copy_length = stp->copy_length;
-    use_eof = copy_length < (off_t)0;
+    use_eof = copy_length < (rb_off_t)0;
     src_offset = stp->src_offset;
-    use_pread = src_offset >= (off_t)0;
+    use_pread = src_offset >= (rb_off_t)0;
 
     if (use_pread && stp->close_src) {
-        off_t r;
+        rb_off_t r;
         errno = 0;
         r = lseek(stp->src_fptr->fd, src_offset, SEEK_SET);
-        if (r < (off_t)0 && errno) {
+        if (r < (rb_off_t)0 && errno) {
             stp->syserr = "lseek";
             stp->error_no = errno;
             return;
         }
-        src_offset = (off_t)-1;
+        src_offset = (rb_off_t)-1;
         use_pread = 0;
     }
 
     while (use_eof || 0 < copy_length) {
-        if (!use_eof && copy_length < (off_t)sizeof(buf)) {
+        if (!use_eof && copy_length < (rb_off_t)sizeof(buf)) {
             len = (size_t)copy_length;
         }
         else {
@@ -12651,7 +12651,7 @@ nogvl_copy_stream_read_write(struct copy_stream_struct *stp)
                 src_offset += ss;
         }
         else {
-            ss = maygvl_copy_stream_read(0, stp, buf, len, (off_t)-1);
+            ss = maygvl_copy_stream_read(0, stp, buf, len, (rb_off_t)-1);
         }
         if (ss <= 0) /* EOF or error */
             return;
@@ -12706,8 +12706,8 @@ copy_stream_fallback_body(VALUE arg)
     const int buflen = 16*1024;
     VALUE n;
     VALUE buf = rb_str_buf_new(buflen);
-    off_t rest = stp->copy_length;
-    off_t off = stp->src_offset;
+    rb_off_t rest = stp->copy_length;
+    rb_off_t off = stp->src_offset;
     ID read_method = id_readpartial;
 
     if (!stp->src_fptr) {
@@ -12719,7 +12719,7 @@ copy_stream_fallback_body(VALUE arg)
     while (1) {
         long numwrote;
         long l;
-        if (stp->copy_length < (off_t)0) {
+        if (stp->copy_length < (rb_off_t)0) {
             l = buflen;
         }
         else {
@@ -12744,7 +12744,7 @@ copy_stream_fallback_body(VALUE arg)
                 return Qnil;
             if (ss == 0)
                 rb_eof_error();
-            if (off >= (off_t)0)
+            if (off >= (rb_off_t)0)
                 off += ss;
         }
         n = rb_io_write(stp->dst, buf);
@@ -12762,7 +12762,7 @@ copy_stream_fallback_body(VALUE arg)
 static VALUE
 copy_stream_fallback(struct copy_stream_struct *stp)
 {
-    if (!stp->src_fptr && stp->src_offset >= (off_t)0) {
+    if (!stp->src_fptr && stp->src_offset >= (rb_off_t)0) {
         rb_raise(rb_eArgError, "cannot specify src_offset for non-IO");
     }
     rb_rescue2(copy_stream_fallback_body, (VALUE)stp,
@@ -12862,10 +12862,10 @@ copy_stream_body(VALUE arg)
     if (stp->dst_fptr)
         io_ascii8bit_binmode(stp->dst_fptr);
 
-    if (stp->src_offset < (off_t)0 && stp->src_fptr && stp->src_fptr->rbuf.len) {
+    if (stp->src_offset < (rb_off_t)0 && stp->src_fptr && stp->src_fptr->rbuf.len) {
         size_t len = stp->src_fptr->rbuf.len;
         VALUE str;
-        if (stp->copy_length >= (off_t)0 && stp->copy_length < (off_t)len) {
+        if (stp->copy_length >= (rb_off_t)0 && stp->copy_length < (rb_off_t)len) {
             len = (size_t)stp->copy_length;
         }
         str = rb_str_buf_new(len);
@@ -12879,7 +12879,7 @@ copy_stream_body(VALUE arg)
             rb_io_write(dst_io, str);
         rb_str_resize(str, 0);
         stp->total += len;
-        if (stp->copy_length >= (off_t)0)
+        if (stp->copy_length >= (rb_off_t)0)
             stp->copy_length -= len;
     }
 
@@ -12992,12 +12992,12 @@ rb_io_s_copy_stream(int argc, VALUE *argv, VALUE io)
     st.dst_fptr = NULL;
 
     if (NIL_P(length))
-        st.copy_length = (off_t)-1;
+        st.copy_length = (rb_off_t)-1;
     else
         st.copy_length = NUM2OFFT(length);
 
     if (NIL_P(src_offset))
-        st.src_offset = (off_t)-1;
+        st.src_offset = (rb_off_t)-1;
     else
         st.src_offset = NUM2OFFT(src_offset);
 
@@ -13013,7 +13013,7 @@ rb_io_s_copy_stream(int argc, VALUE *argv, VALUE io)
  *  Returns the Encoding object that represents the encoding of the stream,
  *  or +nil+ if the stream is in write mode and no encoding is specified.
  *
- *  See {Encodings}[rdoc-ref:IO@Encodings].
+ *  See {Encodings}[rdoc-ref:File@Encodings].
  *
  */
 
@@ -13041,7 +13041,7 @@ rb_io_external_encoding(VALUE io)
  *  if conversion is specified,
  *  or +nil+ otherwise.
  *
- *  See {Encodings}[rdoc-ref:IO@Encodings].
+ *  See {Encodings}[rdoc-ref:File@Encodings].
  *
  */
 
@@ -13060,7 +13060,7 @@ rb_io_internal_encoding(VALUE io)
  *    set_encoding(ext_enc, int_enc, **enc_opts)  -> self
  *    set_encoding('ext_enc:int_enc', **enc_opts) -> self
  *
- *  See {Encodings}[rdoc-ref:IO@Encodings].
+ *  See {Encodings}[rdoc-ref:File@Encodings].
  *
  *  Argument +ext_enc+, if given, must be an Encoding object;
  *  it is assigned as the encoding for the stream.
@@ -14373,7 +14373,10 @@ set_LAST_READ_LINE(VALUE val, ID _x, VALUE *_y)
  *  The global constant ARGF (also accessible as <tt>$<</tt>)
  *  provides an IO-like stream that allows access to all file paths
  *  found in ARGV (or found in STDIN if ARGV is empty).
- *  Note that ARGF is not itself a subclass of \IO.
+ *  ARGF is not itself a subclass of \IO.
+ *
+ *  \Class StringIO provides an IO-like stream that handles a String.
+ *  \StringIO is not itself a subclass of \IO.
  *
  *  Important objects based on \IO include:
  *
@@ -14391,20 +14394,23 @@ set_LAST_READ_LINE(VALUE val, ID _x, VALUE *_y)
  *  - Kernel#open: Returns a new \IO object connected to a given source:
  *    stream, file, or subprocess.
  *
- *  An \IO stream has:
+ *  Like a \File stream, an \IO stream has:
  *
  *  - A read/write mode, which may be read-only, write-only, or read/write;
- *    see {Read/Write Mode}[rdoc-ref:IO@Read-2FWrite+Mode].
+ *    see {Read/Write Mode}[rdoc-ref:File@Read-2FWrite+Mode].
  *  - A data mode, which may be text-only or binary;
- *    see {Data Mode}[rdoc-ref:IO@Data+Mode].
+ *    see {Data Mode}[rdoc-ref:File@Data+Mode].
+ *  - Internal and external encodings;
+ *    see {Encodings}[rdoc-ref:File@Encodings].
+ *
+ *  And like other \IO streams, it has:
+ *
  *  - A position, which determines where in the stream the next
  *    read or write is to occur;
- *    see {Position}[rdoc-ref:IO@Position].
+ *    see {Position}[rdoc-ref:io_streams.rdoc@Position].
  *  - A line number, which is a special, line-oriented, "position"
  *    (different from the position mentioned above);
- *    see {Line Number}[rdoc-ref:IO@Line+Number].
- *  - Internal and external encodings;
- *    see {Encodings}[rdoc-ref:IO@Encodings].
+ *    see {Line Number}[rdoc-ref:io_streams.rdoc@Line+Number].
  *
  *  == Extension <tt>io/console</tt>
  *
@@ -14414,158 +14420,9 @@ set_LAST_READ_LINE(VALUE val, ID _x, VALUE *_y)
  *
  *  == Example Files
  *
- *  Many examples here use these filenames and their corresponding files:
+ *  Many examples here use these variables:
  *
- *  - <tt>t.txt</tt>: A text-only file that is assumed to exist via:
- *
- *      text = <<~EOT
- *        First line
- *        Second line
- *
- *        Fourth line
- *        Fifth line
- *      EOT
- *      File.write('t.txt', text)
- *
- *  - <tt>t.dat</tt>: A data file that is assumed to exist via:
- *
- *      data = "\u9990\u9991\u9992\u9993\u9994"
- *      f = File.open('t.dat', 'wb:UTF-16')
- *      f.write(data)
- *      f.close
- *
- *  - <tt>t.rus</tt>: A Russian-language text file that is assumed to exist via:
- *
- *      File.write('t.rus', "\u{442 435 441 442}")
- *
- *  - <tt>t.tmp</tt>: A file that is assumed _not_ to exist.
- *
- *  == Modes
- *
- *  A number of \IO method calls must or may specify a _mode_ for the stream;
- *  the mode determines how stream is to be accessible, including:
- *
- *  - Whether the stream is to be read-only, write-only, or read-write.
- *  - Whether the stream is positioned at its beginning or its end.
- *  - Whether the stream treats data as text-only or binary.
- *  - The external and internal encodings.
- *
- *  === Read/Write Mode
- *
- *  ==== Read/Write Mode Specified as an \Integer
- *
- *  When +mode+ is an integer it must be one or more (combined by bitwise OR (<tt>|</tt>)
- *  of the following modes:
- *
- *  - +File::RDONLY+: Open for reading only.
- *  - +File::WRONLY+: Open for writing only.
- *  - +File::RDWR+: Open for reading and writing.
- *  - +File::APPEND+: Open for appending only.
- *  - +File::CREAT+: Create file if it does not exist.
- *  - +File::EXCL+: Raise an exception if +File::CREAT+ is given and the file exists.
- *
- *  Examples:
- *
- *    File.new('t.txt', File::RDONLY)
- *    File.new('t.tmp', File::RDWR | File::CREAT | File::EXCL)
- *
- *  Note: Method IO#set_encoding does not allow the mode to be specified as an integer.
- *
- *  ==== Read/Write Mode Specified As a \String
- *
- *  When +mode+ is a string it must begin with one of the following:
- *
- *  - <tt>'r'</tt>: Read-only stream, positioned at the beginning;
- *    the stream cannot be changed to writable.
- *  - <tt>'w'</tt>: Write-only stream, positioned at the beginning;
- *    the stream cannot be changed to readable.
- *  - <tt>'a'</tt>: Write-only stream, positioned at the end;
- *    every write appends to the end;
- *    the stream cannot be changed to readable.
- *  - <tt>'r+'</tt>: Read-write stream, positioned at the beginning.
- *  - <tt>'w+'</tt>: Read-write stream, positioned at the end.
- *  - <tt>'a+'</tt>: Read-write stream, positioned at the end.
- *
- *  For a writable file stream (that is, any except read-only),
- *  the file is truncated to zero if it exists,
- *  and is created if it does not exist.
- *
- *  Examples:
- *
- *    File.open('t.txt', 'r')
- *    File.open('t.tmp', 'w')
- *
- *  === Data Mode
- *
- *  Either of the following may be suffixed to any of the string read/write modes above:
- *
- *  - <tt>'t'</tt>: Text data; sets the default external encoding to +Encoding::UTF_8+;
- *    on Windows, enables conversion between EOL and CRLF.
- *  - <tt>'b'</tt>: Binary data; sets the default external encoding to +Encoding::ASCII_8BIT+;
- *    on Windows, suppresses conversion between EOL and CRLF.
- *
- *  If neither is given, the stream defaults to text data.
- *
- *  Examples:
- *
- *    File.open('t.txt', 'rt')
- *    File.open('t.dat', 'rb')
- *
- *  The following may be suffixed to any writable string mode above:
- *
- *  - <tt>'x'</tt>: Creates the file if it does not exist;
- *    raises an exception if the file exists.
- *
- *  Example:
- *
- *    File.open('t.tmp', 'wx')
- *
- *  Note that when using integer flags to set the read/write mode, it's not
- *  possible to also set the binary data mode by adding the File::BINARY flag
- *  to the bitwise OR combination of integer flags. This is because, as
- *  documented in File::Constants, the File::BINARY flag only disables line code
- *  conversion, but does not change the external encoding at all.
- *
- *  == Encodings
- *
- *  Any of the string modes above may specify encodings --
- *  either external encoding only or both external and internal encodings --
- *  by appending one or both encoding names, separated by colons:
- *
- *    f = File.new('t.dat', 'rb')
- *    f.external_encoding # => #<Encoding:ASCII-8BIT>
- *    f.internal_encoding # => nil
- *    f = File.new('t.dat', 'rb:UTF-16')
- *    f.external_encoding # => #<Encoding:UTF-16 (dummy)>
- *    f.internal_encoding # => nil
- *    f = File.new('t.dat', 'rb:UTF-16:UTF-16')
- *    f.external_encoding # => #<Encoding:UTF-16 (dummy)>
- *    f.internal_encoding # => #<Encoding:UTF-16>
- *    f.close
- *
- *  The numerous encoding names are available in array Encoding.name_list:
- *
- *    Encoding.name_list.size    # => 175
- *    Encoding.name_list.take(3) # => ["ASCII-8BIT", "UTF-8", "US-ASCII"]
- *
- *  When the external encoding is set,
- *  strings read are tagged by that encoding
- *  when reading, and strings written are converted to that
- *  encoding when writing.
- *
- *  When both external and internal encodings are set,
- *  strings read are converted from external to internal encoding,
- *  and strings written are converted from internal to external encoding.
- *  For further details about transcoding input and output, see Encoding.
- *
- *  If the external encoding is <tt>'BOM|UTF-8'</tt>, <tt>'BOM|UTF-16LE'</tt>
- *  or <tt>'BOM|UTF16-BE'</tt>, Ruby checks for
- *  a Unicode BOM in the input document to help determine the encoding.  For
- *  UTF-16 encodings the file open mode must be binary.
- *  If the BOM is found, it is stripped and the external encoding from the BOM is used.
- *
- *  Note that the BOM-style encoding option is case insensitive,
- *  so 'bom|utf-8' is also valid.)
+ *    :include: doc/examples/files.rdoc
  *
  *  == Open Options
  *
@@ -14587,159 +14444,6 @@ set_LAST_READ_LINE(VALUE val, ID _x, VALUE *_y)
  *
  *  Also available are the options offered in String#encode,
  *  which may control conversion between external internal encoding.
- *
- *  == Lines
- *
- *  Some reader methods in \IO are line-oriented;
- *  such a method reads one or more lines,
- *  which are separated by an implicit or explicit line separator.
- *
- *  These methods include:
- *
- *  - Kernel#gets
- *  - Kernel#readline
- *  - Kernel#readlines
- *  - IO.foreach
- *  - IO.readlines
- *  - IO#each_line
- *  - IO#gets
- *  - IO#readline
- *  - IO#readlines
- *  - ARGF.each
- *  - ARGF.gets
- *  - ARGF.readline
- *  - ARGF.readlines
- *
- *  Each of these methods returns +nil+ if called when already at end-of-stream,
- *  except for IO#readline, which raises an exception.
- *
- *  Each of these methods may be called with:
- *
- *  - An optional line separator, +sep+.
- *  - An optional line-size limit, +limit+.
- *  - Both +sep+ and +limit+.
- *
- *  === Line Separator
- *
- *  The default line separator is the given by the global variable <tt>$/</tt>,
- *  whose value is often <tt>"\n"</tt>.
- *  The line to be read next is all data from the current position
- *  to the next line separator:
- *
- *    f = File.open('t.txt')
- *    f.gets # => "First line\n"
- *    f.gets # => "Second line\n"
- *    f.gets # => "\n"
- *    f.gets # => "Fourth line\n"
- *    f.gets # => "Fifth line\n"
- *    f.close
- *
- *  You can specify a different line separator:
- *
- *    f = File.new('t.txt')
- *    f.gets('l')   # => "First l"
- *    f.gets('li')  # => "ine\nSecond li"
- *    f.gets('lin') # => "ne\n\nFourth lin"
- *    f.gets        # => "e\n"
- *    f.close
- *
- *  There are two special line separators:
- *
- *  - +nil+: The entire stream is read into a single string:
- *
- *      f = File.new('t.txt')
- *      f.gets(nil) # => "First line\nSecond line\n\nFourth line\nFifth line\n"
- *      f.close
- *
- *  - <tt>''</tt> (the empty string): The next "paragraph" is read
- *    (paragraphs being separated by two consecutive line separators):
- *
- *      f = File.new('t.txt')
- *      f.gets('') # => "First line\nSecond line\n\n"
- *      f.gets('') # => "Fourth line\nFifth line\n"
- *      f.close
- *
- *  === Line Limit
- *
- *  The line to be read may be further defined by an optional argument +limit+,
- *  which specifies that the line may not be (much) longer than the given limit;
- *  a multi-byte character will not be split, and so a line may be slightly longer
- *  than the given limit.
- *
- *  If +limit+ is not given, the line is determined only by +sep+.
- *
- *    # Text with 1-byte characters.
- *    File.open('t.txt') {|f| f.gets(1) }  # => "F"
- *    File.open('t.txt') {|f| f.gets(2) }  # => "Fi"
- *    File.open('t.txt') {|f| f.gets(3) }  # => "Fir"
- *    File.open('t.txt') {|f| f.gets(4) }  # => "Firs"
- *    # No more than one line.
- *    File.open('t.txt') {|f| f.gets(10) } # => "First line"
- *    File.open('t.txt') {|f| f.gets(11) } # => "First line\n"
- *    File.open('t.txt') {|f| f.gets(12) } # => "First line\n"
- *
- *    # Text with 2-byte characters, which will not be split.
- *    File.open('r.rus') {|f| f.gets(1).size } # => 1
- *    File.open('r.rus') {|f| f.gets(2).size } # => 1
- *    File.open('r.rus') {|f| f.gets(3).size } # => 2
- *    File.open('r.rus') {|f| f.gets(4).size } # => 2
- *
- *  === Line Separator and Line Limit
- *
- *  With arguments +sep+ and +limit+ given,
- *  combines the two behaviors:
- *
- *  - Returns the next line as determined by line separator +sep+.
- *  - But returns no more bytes than are allowed by the limit.
- *
- *  Example:
- *
- *    File.open('t.txt') {|f| f.gets('li', 20) } # => "First li"
- *    File.open('t.txt') {|f| f.gets('li', 2) }  # => "Fi"
- *
- *  === Line Number
- *
- *  A readable \IO stream has a _line_ _number_,
- *  which is the non-negative integer line number
- *  in the stream where the next read will occur.
- *
- *  A new stream is initially has line number +0+.
- *
- *  \Method IO#lineno returns the line number.
- *
- *  Reading lines from a stream usually changes its line number:
- *
- *    f = File.open('t.txt', 'r')
- *    f.lineno   # => 0
- *    f.readline # => "This is line one.\n"
- *    f.lineno   # => 1
- *    f.readline # => "This is the second line.\n"
- *    f.lineno   # => 2
- *    f.readline # => "Here's the third line.\n"
- *    f.lineno   # => 3
- *    f.eof?     # => true
- *    f.close
- *
- *  Iterating over lines in a stream usually changes its line number:
- *
- *       f = File.open('t.txt')
- *       f.each_line do |line|
- *         p "position=#{f.pos} eof?=#{f.eof?} line=#{line}"
- *       end
- *       f.close
- *
- *  Output:
- *
- *   "position=19 eof?=false line=This is line one.\n"
- *   "position=45 eof?=false line=This is the second line.\n"
- *   "position=70 eof?=true line=This is the third line.\n"
- *
- *  === Line Options
- *
- *  A number of \IO methods accept optional keyword arguments
- *  that determine how lines in a stream are to be treated:
- *
- *  - +:chomp+: If +true+, line separators are omitted; default is +false+.
  *
  *  == What's Here
  *

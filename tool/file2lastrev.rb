@@ -32,8 +32,8 @@ OptionParser.new {|opts|
     rescue VCS::NotFoundError => e
       abort "#{File.basename(Program)}: #{e.message}" unless @suppress_not_found
       opts.remove
+      nil
     end
-    nil
   end
   opts.new
   opts.on("--srcdir=PATH", "use PATH as source directory") do |path|
@@ -62,13 +62,13 @@ OptionParser.new {|opts|
   opts.order! rescue abort "#{File.basename(Program)}: #{$!}\n#{opts}"
   if vcs
     vcs.set_options(vcs_options) # options after --srcdir
-  else
-    new_vcs["."]
+  elsif new_vcs["."]
+  else @suppress_not_found
+    (vcs = VCS::Null.new(nil)).set_options(vcs_options)
   end
 }
-exit unless vcs
 
-@output =
+output =
   case @output
   when :changed, nil
     Proc.new {|last, changed|
@@ -76,28 +76,7 @@ exit unless vcs
     }
   when :revision_h
     Proc.new {|last, changed, modified, branch, title|
-      short = vcs.short_revision(last)
-      if /[^\x00-\x7f]/ =~ title and title.respond_to?(:force_encoding)
-        title = title.dup.force_encoding("US-ASCII")
-      end
-      [
-        "#define RUBY_REVISION #{short.inspect}",
-        ("#define RUBY_FULL_REVISION #{last.inspect}" unless short == last),
-        if branch
-          e = '..'
-          limit = @limit
-          name = branch.sub(/\A(.{#{limit-e.size}}).{#{e.size+1},}/o) {$1+e}
-          name = name.dump.sub(/\\#/, '#')
-          "#define RUBY_BRANCH_NAME #{name}"
-        end,
-        if title
-          title = title.dump.sub(/\\#/, '#')
-          "#define RUBY_LAST_COMMIT_TITLE #{title}"
-        end,
-        if modified
-          modified.utc.strftime('#define RUBY_RELEASE_DATETIME "%FT%TZ"')
-        end,
-      ].compact
+      vcs.revision_header(last, modified, modified, branch, title, limit: @limit)
     }
   when :doxygen
     Proc.new {|last, changed|
@@ -114,9 +93,8 @@ exit unless vcs
 ok = true
 (ARGV.empty? ? [nil] : ARGV).each do |arg|
   begin
-    puts @output[*vcs.get_revisions(arg)]
+    puts output[*vcs.get_revisions(arg)]
   rescue => e
-    next if @suppress_not_found and VCS::NotFoundError === e
     warn "#{File.basename(Program)}: #{e.message}"
     ok = false
   end

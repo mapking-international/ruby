@@ -329,9 +329,9 @@ By default, this RubyGems will install gem as:
       # ignore
     end
 
-    if File.writable? gem_doc_dir and
-       (not File.exist? rubygems_doc_dir or
-        File.writable? rubygems_doc_dir)
+    if File.writable?(gem_doc_dir) &&
+       (!File.exist?(rubygems_doc_dir) ||
+        File.writable?(rubygems_doc_dir))
       say "Removing old RubyGems RDoc and ri" if @verbose
       Dir[File.join(Gem.dir, "doc", "rubygems-[0-9]*")].each do |dir|
         rm_rf dir
@@ -559,7 +559,7 @@ abort "#{deprecation_message}"
 
         history_string = ""
 
-        until versions.length == 0 or
+        until versions.length == 0 ||
               versions.shift <= options[:previous_version] do
           history_string += version_lines.shift + text.shift
         end
@@ -576,7 +576,7 @@ abort "#{deprecation_message}"
     require_relative "../uninstaller"
 
     ui = Gem::Uninstaller.new("gemcutter", :all => true, :ignore => true,
-                              :version => "< 0.4")
+                                           :version => "< 0.4")
     ui.uninstall
   rescue Gem::InstallError
   end

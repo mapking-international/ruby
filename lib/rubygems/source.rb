@@ -12,8 +12,8 @@ class Gem::Source
   include Gem::Text
 
   FILES = { # :nodoc:
-    :released   => "specs",
-    :latest     => "latest_specs",
+    :released => "specs",
+    :latest => "latest_specs",
     :prerelease => "prerelease_specs",
   }.freeze
 
@@ -62,7 +62,7 @@ class Gem::Source
   end
 
   def ==(other) # :nodoc:
-    self.class === other and @uri == other.uri
+    self.class === other && @uri == other.uri
   end
 
   alias_method :eql?, :== # :nodoc:

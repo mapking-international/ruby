@@ -428,16 +428,17 @@ rb_vm_pop_frame(rb_execution_context_t *ec)
 static inline VALUE
 rb_arity_error_new(int argc, int min, int max)
 {
-    VALUE err_mess = 0;
+    VALUE err_mess = rb_sprintf("wrong number of arguments (given %d, expected %d", argc, min);
     if (min == max) {
-        err_mess = rb_sprintf("wrong number of arguments (given %d, expected %d)", argc, min);
+        /* max is not needed */
     }
     else if (max == UNLIMITED_ARGUMENTS) {
-        err_mess = rb_sprintf("wrong number of arguments (given %d, expected %d+)", argc, min);
+        rb_str_cat_cstr(err_mess, "+");
     }
     else {
-        err_mess = rb_sprintf("wrong number of arguments (given %d, expected %d..%d)", argc, min, max);
+        rb_str_catf(err_mess, "..%d", max);
     }
+    rb_str_cat_cstr(err_mess, ")");
     return rb_exc_new3(rb_eArgError, err_mess);
 }
 
@@ -799,7 +800,7 @@ cref_replace_with_duplicated_cref_each_frame(const VALUE *vptr, int can_be_svar,
             break;
         }
     }
-    return FALSE;
+    return NULL;
 }
 
 static rb_cref_t *
@@ -1040,6 +1041,26 @@ vm_get_ev_const(rb_execution_context_t *ec, VALUE orig_klass, ID id, bool allow_
 }
 
 static inline VALUE
+vm_get_ev_const_chain(rb_execution_context_t *ec, const ID *segments)
+{
+    VALUE val = Qnil;
+    int idx = 0;
+    int allow_nil = TRUE;
+    if (segments[0] == idNULL) {
+        val = rb_cObject;
+        idx++;
+        allow_nil = FALSE;
+    }
+    while (segments[idx]) {
+        ID id = segments[idx++];
+        val = vm_get_ev_const(ec, val, id, allow_nil, 0);
+        allow_nil = FALSE;
+    }
+    return val;
+}
+
+
+static inline VALUE
 vm_get_cvar_base(const rb_cref_t *cref, const rb_control_frame_t *cfp, int top_level_raise)
 {
     VALUE klass;
@@ -1097,6 +1118,11 @@ fill_ivar_cache(const rb_iseq_t *iseq, IVC ic, const struct rb_callcache *cc, in
     }
 }
 
+#define ractor_incidental_shareable_p(cond, val) \
+    (!(cond) || rb_ractor_shareable_p(val))
+#define ractor_object_incidental_shareable_p(obj, val) \
+    ractor_incidental_shareable_p(rb_ractor_shareable_p(obj), val)
+
 ALWAYS_INLINE(static VALUE vm_getivar(VALUE, ID, const rb_iseq_t *, IVC, const struct rb_callcache *, int));
 static inline VALUE
 vm_getivar(VALUE obj, ID id, const rb_iseq_t *iseq, IVC ic, const struct rb_callcache *cc, int is_attr)
@@ -1118,7 +1144,7 @@ vm_getivar(VALUE obj, ID id, const rb_iseq_t *iseq, IVC ic, const struct rb_call
             LIKELY(index < ROBJECT_NUMIV(obj))) {
             val = ROBJECT_IVPTR(obj)[index];
 
-            VM_ASSERT(rb_ractor_shareable_p(obj) ? rb_ractor_shareable_p(val) : true);
+            VM_ASSERT(ractor_object_incidental_shareable_p(obj, val));
         }
         else if (FL_TEST_RAW(obj, FL_EXIVAR)) {
             val = rb_ivar_generic_lookup_with_index(obj, id, index);
@@ -1139,7 +1165,7 @@ vm_getivar(VALUE obj, ID id, const rb_iseq_t *iseq, IVC ic, const struct rb_call
                 if (ent->index < ROBJECT_NUMIV(obj)) {
                     val = ROBJECT_IVPTR(obj)[ent->index];
 
-                    VM_ASSERT(rb_ractor_shareable_p(obj) ? rb_ractor_shareable_p(val) : true);
+                    VM_ASSERT(ractor_object_incidental_shareable_p(obj, val));
                 }
             }
         }
@@ -1960,8 +1986,33 @@ vm_search_method(VALUE cd_owner, struct rb_call_data *cd, VALUE recv)
     return vm_search_method_fastpath(cd_owner, cd, klass);
 }
 
+#if __has_attribute(transparent_union)
+typedef union {
+    VALUE (*anyargs)(ANYARGS);
+    VALUE (*f00)(VALUE);
+    VALUE (*f01)(VALUE, VALUE);
+    VALUE (*f02)(VALUE, VALUE, VALUE);
+    VALUE (*f03)(VALUE, VALUE, VALUE, VALUE);
+    VALUE (*f04)(VALUE, VALUE, VALUE, VALUE, VALUE);
+    VALUE (*f05)(VALUE, VALUE, VALUE, VALUE, VALUE, VALUE);
+    VALUE (*f06)(VALUE, VALUE, VALUE, VALUE, VALUE, VALUE, VALUE);
+    VALUE (*f07)(VALUE, VALUE, VALUE, VALUE, VALUE, VALUE, VALUE, VALUE);
+    VALUE (*f08)(VALUE, VALUE, VALUE, VALUE, VALUE, VALUE, VALUE, VALUE, VALUE);
+    VALUE (*f09)(VALUE, VALUE, VALUE, VALUE, VALUE, VALUE, VALUE, VALUE, VALUE, VALUE);
+    VALUE (*f10)(VALUE, VALUE, VALUE, VALUE, VALUE, VALUE, VALUE, VALUE, VALUE, VALUE, VALUE);
+    VALUE (*f11)(VALUE, VALUE, VALUE, VALUE, VALUE, VALUE, VALUE, VALUE, VALUE, VALUE, VALUE, VALUE);
+    VALUE (*f12)(VALUE, VALUE, VALUE, VALUE, VALUE, VALUE, VALUE, VALUE, VALUE, VALUE, VALUE, VALUE, VALUE);
+    VALUE (*f13)(VALUE, VALUE, VALUE, VALUE, VALUE, VALUE, VALUE, VALUE, VALUE, VALUE, VALUE, VALUE, VALUE, VALUE);
+    VALUE (*f14)(VALUE, VALUE, VALUE, VALUE, VALUE, VALUE, VALUE, VALUE, VALUE, VALUE, VALUE, VALUE, VALUE, VALUE, VALUE);
+    VALUE (*f15)(VALUE, VALUE, VALUE, VALUE, VALUE, VALUE, VALUE, VALUE, VALUE, VALUE, VALUE, VALUE, VALUE, VALUE, VALUE, VALUE);
+    VALUE (*fm1)(int, union { VALUE *x; const VALUE *y; } __attribute__((__transparent_union__)), VALUE);
+} __attribute__((__transparent_union__)) cfunc_type;
+#else
+typedef VALUE (*cfunc_type)(ANYARGS);
+#endif
+
 static inline int
-check_cfunc(const rb_callable_method_entry_t *me, VALUE (*func)(ANYARGS))
+check_cfunc(const rb_callable_method_entry_t *me, cfunc_type func)
 {
     if (! me) {
         return false;
@@ -1974,13 +2025,17 @@ check_cfunc(const rb_callable_method_entry_t *me, VALUE (*func)(ANYARGS))
             return false;
         }
         else {
+#if __has_attribute(transparent_union)
+            return me->def->body.cfunc.func == func.anyargs;
+#else
             return me->def->body.cfunc.func == func;
+#endif
         }
     }
 }
 
 static inline int
-vm_method_cfunc_is(const rb_iseq_t *iseq, CALL_DATA cd, VALUE recv, VALUE (*func)(ANYARGS))
+vm_method_cfunc_is(const rb_iseq_t *iseq, CALL_DATA cd, VALUE recv, cfunc_type func)
 {
     VM_ASSERT(iseq != NULL);
     const struct rb_callcache *cc = vm_search_method((VALUE)iseq, cd, recv);
@@ -2680,14 +2735,16 @@ static VALUE
 call_cfunc_m2(VALUE recv, int argc, const VALUE *argv, VALUE (*func)(ANYARGS))
 {
     ractor_unsafe_check();
-    return (*func)(recv, rb_ary_new4(argc, argv));
+    VALUE(*f)(VALUE, VALUE) = (VALUE(*)(VALUE, VALUE))func;
+    return (*f)(recv, rb_ary_new4(argc, argv));
 }
 
 static VALUE
 call_cfunc_m1(VALUE recv, int argc, const VALUE *argv, VALUE (*func)(ANYARGS))
 {
     ractor_unsafe_check();
-    return (*func)(argc, argv, recv);
+    VALUE(*f)(int, const VALUE *, VALUE) = (VALUE(*)(int, const VALUE *, VALUE))func;
+    return (*f)(argc, argv, recv);
 }
 
 static VALUE
@@ -2821,13 +2878,15 @@ call_cfunc_15(VALUE recv, int argc, const VALUE *argv, VALUE (*func)(ANYARGS))
 static VALUE
 ractor_safe_call_cfunc_m2(VALUE recv, int argc, const VALUE *argv, VALUE (*func)(ANYARGS))
 {
-    return (*func)(recv, rb_ary_new4(argc, argv));
+    VALUE(*f)(VALUE, VALUE) = (VALUE(*)(VALUE, VALUE))func;
+    return (*f)(recv, rb_ary_new4(argc, argv));
 }
 
 static VALUE
 ractor_safe_call_cfunc_m1(VALUE recv, int argc, const VALUE *argv, VALUE (*func)(ANYARGS))
 {
-    return (*func)(argc, argv, recv);
+    VALUE(*f)(int, const VALUE *, VALUE) = (VALUE(*)(int, const VALUE *, VALUE))func;
+    return (*f)(argc, argv, recv);
 }
 
 static VALUE
@@ -3182,9 +3241,11 @@ ci_missing_reason(const struct rb_callinfo *ci)
     return stat;
 }
 
+static VALUE vm_call_method_missing(rb_execution_context_t *ec, rb_control_frame_t *reg_cfp, struct rb_calling_info *calling);
+
 static VALUE
 vm_call_symbol(rb_execution_context_t *ec, rb_control_frame_t *reg_cfp,
-               struct rb_calling_info *calling, const struct rb_callinfo *ci, VALUE symbol)
+               struct rb_calling_info *calling, const struct rb_callinfo *ci, VALUE symbol, int flags)
 {
     ASSUME(calling->argc >= 0);
     /* Also assumes CALLER_SETUP_ARG is already done. */
@@ -3194,9 +3255,7 @@ vm_call_symbol(rb_execution_context_t *ec, rb_control_frame_t *reg_cfp,
     VALUE recv = calling->recv;
     VALUE klass = CLASS_OF(recv);
     ID mid = rb_check_id(&symbol);
-    int flags = VM_CALL_FCALL |
-                VM_CALL_OPT_SEND |
-                (calling->kw_splat ? VM_CALL_KW_SPLAT : 0);
+    flags |= VM_CALL_OPT_SEND | (calling->kw_splat ? VM_CALL_KW_SPLAT : 0);
 
     if (UNLIKELY(! mid)) {
         mid = idMethodMissing;
@@ -3243,7 +3302,30 @@ vm_call_symbol(rb_execution_context_t *ec, rb_control_frame_t *reg_cfp,
                                   { .method_missing_reason = missing_reason },
                                   rb_callable_method_entry_with_refinements(klass, mid, NULL));
 
-    return vm_call_method(ec, reg_cfp, calling);
+    if (flags & VM_CALL_FCALL) {
+        return vm_call_method(ec, reg_cfp, calling);
+    }
+
+    const struct rb_callcache *cc = calling->cc;
+    VM_ASSERT(callable_method_entry_p(vm_cc_cme(cc)));
+
+    if (vm_cc_cme(cc) != NULL) {
+        switch (METHOD_ENTRY_VISI(vm_cc_cme(cc))) {
+          case METHOD_VISI_PUBLIC: /* likely */
+            return vm_call_method_each_type(ec, reg_cfp, calling);
+          case METHOD_VISI_PRIVATE:
+            vm_cc_method_missing_reason_set(cc, MISSING_PRIVATE);
+            break;
+          case METHOD_VISI_PROTECTED:
+            vm_cc_method_missing_reason_set(cc, MISSING_PROTECTED);
+            break;
+          default:
+            VM_UNREACHABLE(vm_call_method);
+        }
+        return vm_call_method_missing(ec, reg_cfp, calling);
+    }
+
+    return vm_call_method_nome(ec, reg_cfp, calling);
 }
 
 static VALUE
@@ -3283,7 +3365,7 @@ vm_call_opt_send(rb_execution_context_t *ec, rb_control_frame_t *reg_cfp, struct
         calling->argc -= 1;
         DEC_SP(1);
 
-        return vm_call_symbol(ec, reg_cfp, calling, calling->ci, sym);
+        return vm_call_symbol(ec, reg_cfp, calling, calling->ci, sym, VM_CALL_FCALL);
     }
 }
 
@@ -4097,7 +4179,7 @@ vm_invoke_symbol_block(rb_execution_context_t *ec, rb_control_frame_t *reg_cfp,
         VALUE symbol = VM_BH_TO_SYMBOL(block_handler);
         CALLER_SETUP_ARG(reg_cfp, calling, ci);
         calling->recv = TOPN(--calling->argc);
-        return vm_call_symbol(ec, reg_cfp, calling, ci, symbol);
+        return vm_call_symbol(ec, reg_cfp, calling, ci, symbol, 0);
     }
 }
 
@@ -4357,6 +4439,14 @@ vm_concat_array(VALUE ary1, VALUE ary2st)
     return rb_ary_concat(tmp1, tmp2);
 }
 
+// YJIT implementation is using the C function
+// and needs to call a non-static function
+VALUE
+rb_vm_concat_array(VALUE ary1, VALUE ary2st)
+{
+    return vm_concat_array(ary1, ary2st);
+}
+
 static VALUE
 vm_splat_array(VALUE flag, VALUE ary)
 {
@@ -4372,6 +4462,8 @@ vm_splat_array(VALUE flag, VALUE ary)
     }
 }
 
+// YJIT implementation is using the C function
+// and needs to call a non-static function
 VALUE
 rb_vm_splat_array(VALUE flag, VALUE ary)
 {
@@ -4761,16 +4853,16 @@ vm_sendish(
 
 #ifdef MJIT_HEADER
     /* When calling ISeq which may catch an exception from JIT-ed
-       code, we should not call mjit_exec directly to prevent the
+       code, we should not call jit_exec directly to prevent the
        caller frame from being canceled. That's because the caller
        frame may have stack values in the local variables and the
        cancelling the caller frame will purge them. But directly
-       calling mjit_exec is faster... */
+       calling jit_exec is faster... */
     if (ISEQ_BODY(GET_ISEQ())->catch_except_p) {
         VM_ENV_FLAGS_SET(GET_EP(), VM_FRAME_FLAG_FINISH);
         return vm_exec(ec, true);
     }
-    else if ((val = mjit_exec(ec)) == Qundef) {
+    else if ((val = jit_exec(ec)) == Qundef) {
         VM_ENV_FLAGS_SET(GET_EP(), VM_FRAME_FLAG_FINISH);
         return vm_exec(ec, false);
     }
@@ -4779,9 +4871,8 @@ vm_sendish(
     }
 #else
     /* When calling from VM, longjmp in the callee won't purge any
-       JIT-ed caller frames.  So it's safe to directly call
-       mjit_exec. */
-    return mjit_exec(ec);
+       JIT-ed caller frames. So it's safe to directly call jit_exec. */
+    return jit_exec(ec);
 #endif
 }
 
@@ -4799,11 +4890,14 @@ VALUE rb_mod_name(VALUE);
 static VALUE
 vm_objtostring(const rb_iseq_t *iseq, VALUE recv, CALL_DATA cd)
 {
+    int type = TYPE(recv);
+    if (type == T_STRING) {
+        return recv;
+    }
+
     const struct rb_callcache *cc = vm_search_method((VALUE)iseq, cd, recv);
 
-    switch (TYPE(recv)) {
-      case T_STRING:
-        return recv;
+    switch (type) {
       case T_SYMBOL:
         if (check_cfunc(vm_cc_cme(cc), rb_sym_to_s)) {
             // rb_sym_to_s() allocates a mutable string, but since we are only
@@ -4819,7 +4913,7 @@ vm_objtostring(const rb_iseq_t *iseq, VALUE recv, CALL_DATA cd)
             // going to use this string for interpolation, it's fine to use the
             // frozen string.
             VALUE val = rb_mod_name(recv);
-            if (val == Qnil) {
+            if (NIL_P(val)) {
                 val = rb_mod_to_s(recv);
             }
             return val;
@@ -4917,53 +5011,35 @@ vm_opt_newarray_min(rb_execution_context_t *ec, rb_num_t num, const VALUE *ptr)
 
 #define IMEMO_CONST_CACHE_SHAREABLE IMEMO_FL_USER0
 
-// This is the iterator used by vm_ic_compile for rb_iseq_each. It is used as a
-// callback for each instruction within the ISEQ, and is meant to return a
-// boolean indicating whether or not to keep iterating.
-//
-// This is used to walk through the ISEQ and find all getconstant instructions
-// between the starting opt_getinlinecache and the ending opt_setinlinecache and
-// associating the inline cache with the constant name components on the VM.
-static bool
-vm_ic_compile_i(VALUE *code, VALUE insn, size_t index, void *ic)
+static void
+vm_track_constant_cache(ID id, void *ic)
 {
-    if (insn == BIN(opt_setinlinecache)) {
-        return false;
+    struct rb_id_table *const_cache = GET_VM()->constant_cache;
+    VALUE lookup_result;
+    st_table *ics;
+
+    if (rb_id_table_lookup(const_cache, id, &lookup_result)) {
+        ics = (st_table *)lookup_result;
+    }
+    else {
+        ics = st_init_numtable();
+        rb_id_table_insert(const_cache, id, (VALUE)ics);
     }
 
-    if (insn == BIN(getconstant)) {
-        ID id = code[index + 1];
-        struct rb_id_table *const_cache = GET_VM()->constant_cache;
-        VALUE lookup_result;
-        st_table *ics;
-
-        if (rb_id_table_lookup(const_cache, id, &lookup_result)) {
-            ics = (st_table *)lookup_result;
-        }
-        else {
-            ics = st_init_numtable();
-            rb_id_table_insert(const_cache, id, (VALUE)ics);
-        }
-
-        st_insert(ics, (st_data_t) ic, (st_data_t) Qtrue);
-    }
-
-    return true;
+    st_insert(ics, (st_data_t) ic, (st_data_t) Qtrue);
 }
 
-// Loop through the instruction sequences starting at the opt_getinlinecache
-// call and gather up every getconstant's ID. Associate that with the VM's
-// constant cache so that whenever one of the constants changes the inline cache
-// will get busted.
 static void
-vm_ic_compile(rb_control_frame_t *cfp, IC ic)
+vm_ic_track_const_chain(rb_control_frame_t *cfp, IC ic, const ID *segments)
 {
-    const rb_iseq_t *iseq = cfp->iseq;
-
     RB_VM_LOCK_ENTER();
-    {
-        rb_iseq_each(iseq, cfp->pc - ISEQ_BODY(iseq)->iseq_encoded, vm_ic_compile_i, (void *) ic);
+
+    for (int i = 0; segments[i]; i++) {
+        ID id = segments[i];
+        if (id == idNULL) continue;
+        vm_track_constant_cache(id, ic);
     }
+
     RB_VM_LOCK_LEAVE();
 }
 
@@ -4972,7 +5048,7 @@ static inline bool
 vm_inlined_ic_hit_p(VALUE flags, VALUE value, const rb_cref_t *ic_cref, const VALUE *reg_ep)
 {
     if ((flags & IMEMO_CONST_CACHE_SHAREABLE) || rb_ractor_main_p()) {
-        VM_ASSERT((flags & IMEMO_CONST_CACHE_SHAREABLE) ? rb_ractor_shareable_p(value) : true);
+        VM_ASSERT(ractor_incidental_shareable_p(flags & IMEMO_CONST_CACHE_SHAREABLE, value));
 
         return (ic_cref == NULL || // no need to check CREF
                 ic_cref == vm_get_cref(reg_ep));
@@ -4995,7 +5071,7 @@ rb_vm_ic_hit_p(IC ic, const VALUE *reg_ep)
 }
 
 static void
-vm_ic_update(const rb_iseq_t *iseq, IC ic, VALUE val, const VALUE *reg_ep)
+vm_ic_update(const rb_iseq_t *iseq, IC ic, VALUE val, const VALUE *reg_ep, const VALUE *pc)
 {
     if (ruby_vm_const_missing_count > 0) {
         ruby_vm_const_missing_count = 0;
@@ -5011,7 +5087,9 @@ vm_ic_update(const rb_iseq_t *iseq, IC ic, VALUE val, const VALUE *reg_ep)
 #ifndef MJIT_HEADER
     // MJIT and YJIT can't be on at the same time, so there is no need to
     // notify YJIT about changes to the IC when running inside MJIT code.
-    rb_yjit_constant_ic_update(iseq, ic);
+    RUBY_ASSERT(pc >= ISEQ_BODY(iseq)->iseq_encoded);
+    unsigned pos = (unsigned)(pc - ISEQ_BODY(iseq)->iseq_encoded);
+    rb_yjit_constant_ic_update(iseq, ic, pos);
 #endif
 }
 
@@ -5458,7 +5536,8 @@ vm_opt_aref_with(VALUE recv, VALUE key)
 {
     if (!SPECIAL_CONST_P(recv) && RBASIC_CLASS(recv) == rb_cHash &&
         BASIC_OP_UNREDEFINED_P(BOP_AREF, HASH_REDEFINED_OP_FLAG) &&
-        rb_hash_compare_by_id_p(recv) == Qfalse) {
+        rb_hash_compare_by_id_p(recv) == Qfalse &&
+        !FL_TEST(recv, RHASH_PROC_DEFAULT)) {
         return rb_hash_aref(recv, key);
     }
     else {

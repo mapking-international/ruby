@@ -3773,16 +3773,12 @@ rb_exec_atfork(void* arg, char *errmsg, size_t errmsg_buflen)
     return rb_exec_async_signal_safe(arg, errmsg, errmsg_buflen); /* hopefully async-signal-safe */
 }
 
-#if SIZEOF_INT == SIZEOF_LONG
-#define proc_syswait (VALUE (*)(VALUE))rb_syswait
-#else
 static VALUE
 proc_syswait(VALUE pid)
 {
-    rb_syswait((int)pid);
+    rb_syswait((rb_pid_t)pid);
     return Qnil;
 }
-#endif
 
 static int
 move_fds_to_avoid_crash(int *fdp, int n, VALUE fds)
@@ -4208,6 +4204,30 @@ retry_fork_async_signal_safe(struct rb_process_status *status, int *ep,
     }
 }
 
+#if USE_MJIT
+// This is used to create MJIT's child Ruby process
+pid_t
+rb_mjit_fork(void)
+{
+    struct child_handler_disabler_state old;
+    rb_vm_t *vm = GET_VM();
+    prefork();
+    disable_child_handler_before_fork(&old);
+    before_fork_ruby();
+
+    rb_native_mutex_lock(&vm->waitpid_lock);
+    pid_t pid = rb_fork();
+    if (pid > 0) mjit_add_waiting_pid(vm, pid);
+    rb_native_mutex_unlock(&vm->waitpid_lock);
+
+    after_fork_ruby();
+    disable_child_handler_fork_parent(&old);
+    if (pid == 0) rb_thread_atfork();
+
+    return pid;
+}
+#endif
+
 static rb_pid_t
 fork_check_err(struct rb_process_status *status, int (*chfunc)(void*, char *, size_t), void *charg,
         VALUE fds, char *errmsg, size_t errmsg_buflen,
@@ -4332,12 +4352,30 @@ rb_fork_ruby(int *status)
     return pid;
 }
 
+static rb_pid_t
+proc_fork_pid(void)
+{
+    rb_pid_t pid = rb_fork_ruby(NULL);
+
+    if (pid == -1) {
+        rb_sys_fail("fork(2)");
+    }
+
+    return pid;
+}
+
 rb_pid_t
 rb_call_proc__fork(void)
 {
-    VALUE pid = rb_funcall(rb_mProcess, rb_intern("_fork"), 0);
-
-    return NUM2PIDT(pid);
+    ID id__fork;
+    CONST_ID(id__fork, "_fork");
+    if (rb_method_basic_definition_p(CLASS_OF(rb_mProcess), id__fork)) {
+        return proc_fork_pid();
+    }
+    else {
+        VALUE pid = rb_funcall(rb_mProcess, id__fork, 0);
+        return NUM2PIDT(pid);
+    }
 }
 #endif
 
@@ -4353,16 +4391,18 @@ rb_call_proc__fork(void)
  *  This method is not for casual code but for application monitoring
  *  libraries. You can add custom code before and after fork events
  *  by overriding this method.
+ *
+ *  Note: Process.daemon may be implemented using fork(2) BUT does not go
+ *  through this method.
+ *  Thus, depending on your reason to hook into this method, you
+ *  may also want to hook into that one.
+ *  See {this issue}[https://bugs.ruby-lang.org/issues/18911] for a
+ *  more detailed discussion of this.
  */
 VALUE
 rb_proc__fork(VALUE _obj)
 {
-    rb_pid_t pid = rb_fork_ruby(NULL);
-
-    if (pid == -1) {
-        rb_sys_fail("fork(2)");
-    }
-
+    rb_pid_t pid = proc_fork_pid();
     return PIDT2NUM(pid);
 }
 
@@ -5508,6 +5548,9 @@ rlimit_resource_name2int(const char *name, long len, int casetype)
 #ifdef RLIMIT_NPROC
         RESCHECK(NPROC);
 #endif
+#ifdef RLIMIT_NPTS
+        RESCHECK(NPTS);
+#endif
 #ifdef RLIMIT_NICE
         RESCHECK(NICE);
 #endif
@@ -5736,6 +5779,7 @@ proc_getrlimit(VALUE obj, VALUE resource)
  *  [NICE] ceiling on process's nice(2) value (number) (GNU/Linux)
  *  [NOFILE] file descriptors (number) (SUSv3)
  *  [NPROC] number of processes for the user (number) (4.4BSD, GNU/Linux)
+ *  [NPTS] number of pseudo terminals (number) (FreeBSD)
  *  [RSS] resident memory size (bytes) (4.2BSD, GNU/Linux)
  *  [RTPRIO] ceiling on the process's real-time priority (number) (GNU/Linux)
  *  [RTTIME] CPU time for real-time process (us) (GNU/Linux)
@@ -7069,19 +7113,14 @@ rb_daemon(int nochdir, int noclose)
 #else
     int n;
 
-#define fork_daemon() \
-    switch (rb_fork_ruby(NULL)) { \
-      case -1: return -1; \
-      case 0:  break; \
-      default: _exit(EXIT_SUCCESS); \
+    switch (rb_fork_ruby(NULL)) {
+      case -1: return -1;
+      case 0:  break;
+      default: _exit(EXIT_SUCCESS);
     }
 
-    fork_daemon();
-
-    if (setsid() < 0) return -1;
-
-    /* must not be process-leader */
-    fork_daemon();
+    /* ignore EPERM which means already being process-leader */
+    if (setsid() < 0) (void)0;
 
     if (!nochdir)
         err = chdir("/");
@@ -8687,7 +8726,7 @@ get_PROCESS_ID(ID _x, VALUE *_y)
 
 /*
  *  call-seq:
- *     Process.kill(signal, pid, ...)    -> integer
+ *     Process.kill(signal, pid, *pids)    -> integer
  *
  *  Sends the given signal to the specified process id(s) if _pid_ is positive.
  *  If _pid_ is zero, _signal_ is sent to all processes whose group ID is equal
@@ -8939,6 +8978,14 @@ InitVM_process(void)
      * see the system getrlimit(2) manual for details.
      */
     rb_define_const(rb_mProcess, "RLIMIT_NPROC", INT2FIX(RLIMIT_NPROC));
+#endif
+#ifdef RLIMIT_NPTS
+    /* The maximum number of pseudo-terminals that can be created for the
+     * real user ID of the calling process.
+     *
+     * see the system getrlimit(2) manual for details.
+     */
+    rb_define_const(rb_mProcess, "RLIMIT_NPTS", INT2FIX(RLIMIT_NPTS));
 #endif
 #ifdef RLIMIT_RSS
     /* Specifies the limit (in pages) of the process's resident set.

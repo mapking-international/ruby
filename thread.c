@@ -100,6 +100,10 @@
 #include "vm_debug.h"
 #include "vm_sync.h"
 
+#if USE_MJIT && defined(HAVE_SYS_WAIT_H)
+#include <sys/wait.h>
+#endif
+
 #ifndef USE_NATIVE_THREAD_PRIORITY
 #define USE_NATIVE_THREAD_PRIORITY 0
 #define RUBY_THREAD_PRIORITY_MAX 3
@@ -1353,14 +1357,14 @@ sleep_hrtime_until(rb_thread_t *th, rb_hrtime_t end, unsigned int fl)
 void
 rb_thread_sleep_forever(void)
 {
-    RUBY_DEBUG_LOG("%s", "");
+    RUBY_DEBUG_LOG("");
     sleep_forever(GET_THREAD(), SLEEP_SPURIOUS_CHECK);
 }
 
 void
 rb_thread_sleep_deadly(void)
 {
-    RUBY_DEBUG_LOG("%s", "");
+    RUBY_DEBUG_LOG("");
     sleep_forever(GET_THREAD(), SLEEP_DEADLOCKABLE|SLEEP_SPURIOUS_CHECK);
 }
 
@@ -1384,7 +1388,7 @@ rb_thread_sleep_deadly_allow_spurious_wakeup(VALUE blocker, VALUE timeout, rb_hr
         rb_fiber_scheduler_block(scheduler, blocker, timeout);
     }
     else {
-        RUBY_DEBUG_LOG("%s", "");
+        RUBY_DEBUG_LOG("");
         if (end) {
             sleep_hrtime_until(GET_THREAD(), end, SLEEP_SPURIOUS_CHECK);
         }
@@ -1481,7 +1485,7 @@ blocking_region_begin(rb_thread_t *th, struct rb_blocking_region_buffer *region,
         th->status = THREAD_STOPPED;
         rb_ractor_blocking_threads_inc(th->ractor, __FILE__, __LINE__);
 
-        RUBY_DEBUG_LOG("%s", "");
+        RUBY_DEBUG_LOG("");
 
         RB_GC_SAVE_MACHINE_CONTEXT(th);
         thread_sched_to_waiting(TH_SCHED(th));
@@ -1509,7 +1513,7 @@ blocking_region_end(rb_thread_t *th, struct rb_blocking_region_buffer *region)
         th->status = region->prev_status;
     }
 
-    RUBY_DEBUG_LOG("%s", "");
+    RUBY_DEBUG_LOG("");
     VM_ASSERT(th == GET_THREAD());
 }
 
@@ -2317,16 +2321,16 @@ rb_threadptr_execute_interrupts(rb_thread_t *th, int blocking_timing)
                 ret |= rb_signal_exec(th, sig);
             }
             th->status = prev_status;
+        }
 
 #if USE_MJIT
-            // Handle waitpid_signal for MJIT issued by ruby_sigchld_handler. This needs to be done
-            // outside ruby_sigchld_handler to avoid recursively relying on the SIGCHLD handler.
-            if (mjit_waitpid_finished) {
-                mjit_waitpid_finished = false;
-                mjit_notify_waitpid(mjit_waitpid_status);
-            }
-#endif
+        // Handle waitpid_signal for MJIT issued by ruby_sigchld_handler. This needs to be done
+        // outside ruby_sigchld_handler to avoid recursively relying on the SIGCHLD handler.
+        if (mjit_waitpid_finished && th == th->vm->ractor.main_thread) {
+            mjit_waitpid_finished = false;
+            mjit_notify_waitpid(WIFEXITED(mjit_waitpid_status) ? WEXITSTATUS(mjit_waitpid_status) : -1);
         }
+#endif
 
         /* exception from another thread */
         if (pending_interrupt && threadptr_pending_interrupt_active_p(th)) {

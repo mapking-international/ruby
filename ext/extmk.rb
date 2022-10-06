@@ -66,12 +66,17 @@ end
 
 def atomic_write_open(filename)
   filename_new = filename + ".new.#$$"
-  open(filename_new, "wb") do |f|
+  clean = false
+  File.open(filename_new, "wbx") do |f|
+    clean = true
     yield f
   end
   if File.binread(filename_new) != (File.binread(filename) rescue nil)
     File.rename(filename_new, filename)
-  else
+    clean = false
+  end
+ensure
+  if clean
     File.unlink(filename_new)
   end
 end
@@ -412,8 +417,10 @@ if CROSS_COMPILING
   $ruby = $mflags.defined?("MINIRUBY") || CONFIG['MINIRUBY']
 elsif sep = config_string('BUILD_FILE_SEPARATOR')
   $ruby = "$(topdir:/=#{sep})#{sep}miniruby" + EXEEXT
-else
+elsif CONFIG['EXTSTATIC']
   $ruby = '$(topdir)/miniruby' + EXEEXT
+else
+  $ruby = '$(topdir)/ruby' + EXEEXT
 end
 $ruby = [$ruby]
 $ruby << "-I'$(topdir)'"
@@ -425,6 +432,7 @@ end
 topruby = $ruby
 $ruby = topruby.join(' ')
 $mflags << "ruby=#$ruby"
+$builtruby = '$(topdir)/miniruby' + EXEEXT # Must be an executable path
 
 MTIMES = [__FILE__, 'rbconfig.rb', srcdir+'/lib/mkmf.rb'].collect {|f| File.mtime(f)}
 
@@ -599,7 +607,7 @@ CP_R = #{config_string('CP')} -r
 
 gemlib = $(TARGET_TOPDIR)/gems/$(gem)/lib
 gemlib:#{%{ $(gemlib)\n$(gemlib): $(gem_srcdir)/lib} if $nmake}
-	$(Q) #{@inplace ? '$(NULLCMD) ' : ''}$(RUBY) $(top_srcdir)/tool/ln_sr.rb -f -T $(gem_srcdir)/lib $(gemlib)
+	$(Q) #{@inplace ? '$(NULLCMD) ' : ''}$(RUBY) $(top_srcdir)/tool/ln_sr.rb -q -f -T $(gem_srcdir)/lib $(gemlib)
 
 clean-gemlib:
 	$(Q) $(#{@inplace ? 'NULLCMD' : 'RM_RF'}) $(gemlib)

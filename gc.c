@@ -3904,7 +3904,8 @@ objspace_each_objects_try(VALUE arg)
             uintptr_t pstart = (uintptr_t)page->start;
             uintptr_t pend = pstart + (page->total_slots * size_pool->slot_size);
 
-            if ((*data->callback)((void *)pstart, (void *)pend, size_pool->slot_size, data->data)) {
+            if (!__asan_region_is_poisoned((void *)pstart, pend - pstart) &&
+                (*data->callback)((void *)pstart, (void *)pend, size_pool->slot_size, data->data)) {
                 break;
             }
 
@@ -12120,10 +12121,16 @@ objspace_malloc_fixup(rb_objspace_t *objspace, void *mem, size_t size)
 }
 
 #if defined(__GNUC__) && RUBY_DEBUG
-#define RB_BUG_INSTEAD_OF_RB_MEMERROR
+#define RB_BUG_INSTEAD_OF_RB_MEMERROR 1
 #endif
 
-#ifdef RB_BUG_INSTEAD_OF_RB_MEMERROR
+#ifndef RB_BUG_INSTEAD_OF_RB_MEMERROR
+# define RB_BUG_INSTEAD_OF_RB_MEMERROR 0
+#endif
+
+#define GC_MEMERROR(...) \
+    ((RB_BUG_INSTEAD_OF_RB_MEMERROR+0) ? rb_bug("" __VA_ARGS__) : rb_memerror())
+
 #define TRY_WITH_GC(siz, expr) do {                          \
         const gc_profile_record_flag gpr =                   \
             GPR_FLAG_FULL_MARK           |                   \
@@ -12137,29 +12144,17 @@ objspace_malloc_fixup(rb_objspace_t *objspace, void *mem, size_t size)
         }                                                    \
         else if (!garbage_collect_with_gvl(objspace, gpr)) { \
             /* @shyouhei thinks this doesn't happen */       \
-            rb_bug("TRY_WITH_GC: could not GC");             \
+            GC_MEMERROR("TRY_WITH_GC: could not GC");        \
         }                                                    \
         else if ((expr)) {                                   \
             /* Success on 2nd try */                         \
         }                                                    \
         else {                                               \
-            rb_bug("TRY_WITH_GC: could not allocate:"        \
-                   "%"PRIdSIZE" bytes for %s",               \
-                   siz, # expr);                             \
+            GC_MEMERROR("TRY_WITH_GC: could not allocate:"   \
+                        "%"PRIdSIZE" bytes for %s",          \
+                        siz, # expr);                        \
         }                                                    \
     } while (0)
-#else
-#define TRY_WITH_GC(siz, alloc) do { \
-        objspace_malloc_gc_stress(objspace); \
-        if (!(alloc) && \
-            (!garbage_collect_with_gvl(objspace, GPR_FLAG_FULL_MARK | \
-                GPR_FLAG_IMMEDIATE_MARK | GPR_FLAG_IMMEDIATE_SWEEP | \
-                GPR_FLAG_MALLOC) || \
-             !(alloc))) { \
-            ruby_memerror(); \
-        } \
-    } while (0)
-#endif
 
 /* these shouldn't be called directly.
  * objspace_* functions do not check allocation size.
@@ -12241,7 +12236,7 @@ objspace_xrealloc(rb_objspace_t *objspace, void *ptr, size_t new_size, size_t ol
 #endif
 
     old_size = objspace_malloc_size(objspace, ptr, old_size);
-    TRY_WITH_GC(new_size, mem = realloc(ptr, new_size));
+    TRY_WITH_GC(new_size, mem = RB_GNUC_EXTENSION_BLOCK(realloc(ptr, new_size)));
     new_size = objspace_malloc_size(objspace, mem, new_size);
 
 #if CALC_EXACT_MALLOC_SIZE
@@ -13803,11 +13798,10 @@ rb_raw_iseq_info(char *const buff, const size_t buff_size, const rb_iseq_t *iseq
 {
     if (buff_size > 0 && ISEQ_BODY(iseq) && ISEQ_BODY(iseq)->location.label && !RB_TYPE_P(ISEQ_BODY(iseq)->location.pathobj, T_MOVED)) {
         VALUE path = rb_iseq_path(iseq);
-        VALUE n = ISEQ_BODY(iseq)->location.first_lineno;
+        int n = ISEQ_BODY(iseq)->location.first_lineno;
         snprintf(buff, buff_size, " %s@%s:%d",
                  RSTRING_PTR(ISEQ_BODY(iseq)->location.label),
-                 RSTRING_PTR(path),
-                 n ? FIX2INT(n) : 0 );
+                 RSTRING_PTR(path), n);
     }
 }
 
